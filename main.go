@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	var mode = flag.String("mode", "matrix", "Visualization mode: matrix, nyancat, or snake")
+	var mode = flag.String("mode", "matrix", "Visualization mode: matrix, nyancat, snake, or missiledefender")
 	var interactive = flag.Bool("interactive", false, "Enable interactive mode (for snake: use arrow keys to play)")
 	flag.Parse()
 
@@ -39,9 +39,11 @@ func main() {
 		runNyancat(screen, sigChan)
 	case "snake":
 		runSnake(screen, sigChan, *interactive)
+	case "missiledefender":
+		runMissileDefender(screen, sigChan)
 	default:
 		screen.Fini()
-		fmt.Fprintf(os.Stderr, "Unknown mode: %s. Use: matrix, nyancat, or snake\n", *mode)
+		fmt.Fprintf(os.Stderr, "Unknown mode: %s. Use: matrix, nyancat, snake, or missiledefender\n", *mode)
 		os.Exit(1)
 	}
 }

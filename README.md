@@ -7,6 +7,7 @@ A terminal screensaver with multiple visualizations, written in Go.
 - **Matrix Rain**: Classic falling characters effect with katakana, hiragana, and alphanumeric characters
 - **Nyancat**: Animated rainbow-trailing cat flying through space
 - **Snake**: Classic Nokia-style snake game (use arrow keys to play)
+- **Missile Defender**: Automatic tower defense game where towers defend against incoming missiles (towers and terrain randomize every 30-45 seconds)
 
 ## Installation
 
@@ -68,6 +69,7 @@ Run the screensaver with a specific mode:
 ./termsaver -mode nyancat  # Flying rainbow cat
 ./termsaver -mode snake    # Snake game (automatic by default)
 ./termsaver -mode snake -interactive  # Snake game with manual control
+./termsaver -mode missiledefender  # Tower defense game (fully automatic)
 ```
 
 ### Controls
@@ -75,6 +77,7 @@ Run the screensaver with a specific mode:
 - **Matrix/Nyancat**: Press `Esc` or `Ctrl+C` to exit
 - **Snake (interactive mode)**: Use arrow keys to control the snake, `Esc` or `Ctrl+C` to exit
 - **Snake (automatic mode, default)**: The snake plays perfectly by itself using pathfinding AI
+- **Missile Defender**: Fully automatic - the program plays both attack and defense sides. Press `Esc` or `Ctrl+C` to exit
 
 ## Requirements
 
