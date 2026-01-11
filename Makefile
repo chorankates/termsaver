@@ -27,12 +27,4 @@ build:
 clean:
 	rm -rf bin/
 
-# Run locally
-run:
-	go run . -mode matrix
-
-# Install dependencies
-deps:
-	go mod download
-	go mod tidy
 
