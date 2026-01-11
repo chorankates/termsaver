@@ -10,7 +10,8 @@ a terminal screensaver with multiple visualizations
 | `nyancat `        | animated rainbow-trailing cat flying through space                                                                            | 
 | `snake`           | classic Nokia-style snake game (use arrow keys to play)                                                                       | 
 | `missiledefender` | automatic tower defense game where towers defend against incoming missiles (towers and terrain randomize every 30-45 seconds) | 
-| `spectrogragraph` | fake audio spectrograph with animated colored bars that continuously change                                                   | 
+| `spectrogragraph` | fake audio spectrograph with animated colored bars that continuously change                                                   |
+| `snowflakes`      | falling snow that accumulates at the bottom and clears periodically                                                          | 
 
 ## usage
 
@@ -21,4 +22,5 @@ a terminal screensaver with multiple visualizations
 ./termsaver -mode snake -interactive  # Snake game with manual control
 ./termsaver -mode missiledefender  # Tower defense game (fully automatic)
 ./termsaver -mode spectrograph  # Fake audio spectrograph with animated colored bars
+./termsaver -mode snowflakes    # Falling snow that accumulates and clears periodically
 ```

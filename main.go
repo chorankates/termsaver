@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	var mode = flag.String("mode", "matrix", "Visualization mode: matrix, nyancat, snake, missiledefender, or spectrograph")
+	var mode = flag.String("mode", "matrix", "Visualization mode: matrix, nyancat, snake, missiledefender, spectrograph, or snowflakes")
 	var interactive = flag.Bool("interactive", false, "Enable interactive mode (for snake: use arrow keys to play)")
 	var grayscale = flag.Bool("grayscale", false, "Use grayscale colors instead of colors")
 	flag.Parse()
@@ -44,9 +44,11 @@ func main() {
 		runMissileDefender(screen, sigChan, *grayscale)
 	case "spectrograph":
 		runSpectrograph(screen, sigChan, *grayscale)
+	case "snowflakes":
+		runSnowflakes(screen, sigChan, *grayscale)
 	default:
 		screen.Fini()
-		fmt.Fprintf(os.Stderr, "Unknown mode: %s. Use: matrix, nyancat, snake, missiledefender, or spectrograph\n", *mode)
+		fmt.Fprintf(os.Stderr, "Unknown mode: %s. Use: matrix, nyancat, snake, missiledefender, spectrograph, or snowflakes\n", *mode)
 		os.Exit(1)
 	}
 }
