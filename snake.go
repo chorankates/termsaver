@@ -19,7 +19,7 @@ type Snake struct {
 	alive     bool
 }
 
-func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool) {
+func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool, grayscale bool) {
 	w, h := screen.Size()
 
 	// Initialize snake in center
@@ -93,7 +93,7 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool) {
 					x = 0
 				}
 				y := h / 2
-				style := tcell.StyleDefault.Foreground(tcell.ColorRed).Background(tcell.ColorBlack)
+				style := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorRed, grayscale)).Background(tcell.ColorBlack)
 				for i, char := range msg {
 					if x+i >= 0 && x+i < w {
 						screen.SetContent(x+i, y, char, nil, style)
@@ -162,7 +162,7 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool) {
 			screen.Clear()
 
 			// Draw border
-			borderStyle := tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorBlack)
+			borderStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorWhite, grayscale)).Background(tcell.ColorBlack)
 			for x := 0; x < w; x++ {
 				screen.SetContent(x, 0, '─', nil, borderStyle)
 				screen.SetContent(x, h-1, '─', nil, borderStyle)
@@ -177,8 +177,8 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool) {
 			screen.SetContent(w-1, h-1, '┘', nil, borderStyle)
 
 			// Draw snake
-			snakeStyle := tcell.StyleDefault.Foreground(tcell.ColorGreen).Background(tcell.ColorBlack)
-			headStyle := tcell.StyleDefault.Foreground(tcell.ColorLime).Background(tcell.ColorBlack)
+			snakeStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorGreen, grayscale)).Background(tcell.ColorBlack)
+			headStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorLime, grayscale)).Background(tcell.ColorBlack)
 			for i, segment := range snake.body {
 				char := '█'
 				if i == 0 {
@@ -190,12 +190,12 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool) {
 			}
 
 			// Draw food
-			foodStyle := tcell.StyleDefault.Foreground(tcell.ColorRed).Background(tcell.ColorBlack)
+			foodStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorRed, grayscale)).Background(tcell.ColorBlack)
 			screen.SetContent(food.X, food.Y, '●', nil, foodStyle)
 
 			// Draw score
 			scoreStr := fmt.Sprintf("Score: %d", score)
-			scoreStyle := tcell.StyleDefault.Foreground(tcell.ColorYellow).Background(tcell.ColorBlack)
+			scoreStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorYellow, grayscale)).Background(tcell.ColorBlack)
 			for i, char := range scoreStr {
 				if i+1 < w {
 					screen.SetContent(i+1, 1, char, nil, scoreStyle)

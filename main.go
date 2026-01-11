@@ -13,6 +13,7 @@ import (
 func main() {
 	var mode = flag.String("mode", "matrix", "Visualization mode: matrix, nyancat, snake, missiledefender, or spectrograph")
 	var interactive = flag.Bool("interactive", false, "Enable interactive mode (for snake: use arrow keys to play)")
+	var grayscale = flag.Bool("grayscale", false, "Use grayscale colors instead of colors")
 	flag.Parse()
 
 	screen, err := tcell.NewScreen()
@@ -34,19 +35,44 @@ func main() {
 	// Start the selected visualization
 	switch *mode {
 	case "matrix":
-		runMatrixRain(screen, sigChan)
+		runMatrixRain(screen, sigChan, *grayscale)
 	case "nyancat":
-		runNyancat(screen, sigChan)
+		runNyancat(screen, sigChan, *grayscale)
 	case "snake":
-		runSnake(screen, sigChan, *interactive)
+		runSnake(screen, sigChan, *interactive, *grayscale)
 	case "missiledefender":
-		runMissileDefender(screen, sigChan)
+		runMissileDefender(screen, sigChan, *grayscale)
 	case "spectrograph":
-		runSpectrograph(screen, sigChan)
+		runSpectrograph(screen, sigChan, *grayscale)
 	default:
 		screen.Fini()
 		fmt.Fprintf(os.Stderr, "Unknown mode: %s. Use: matrix, nyancat, snake, missiledefender, or spectrograph\n", *mode)
 		os.Exit(1)
+	}
+}
+
+// toGrayscale converts a color to grayscale if grayscale mode is enabled
+func toGrayscale(color tcell.Color, grayscale bool) tcell.Color {
+	if !grayscale {
+		return color
+	}
+	
+	// Map colors to grayscale equivalents based on typical brightness
+	switch color {
+	case tcell.ColorWhite:
+		return tcell.ColorWhite
+	case tcell.ColorBlack:
+		return tcell.ColorBlack
+	case tcell.ColorYellow, tcell.ColorLime, tcell.ColorOrange:
+		return tcell.ColorWhite
+	case tcell.ColorGreen, tcell.ColorBlue, tcell.ColorRed, tcell.ColorPurple,
+		 tcell.ColorAqua, tcell.ColorFuchsia, tcell.ColorPink:
+		return tcell.ColorGray
+	case tcell.ColorDarkGray:
+		return tcell.ColorDarkGray
+	default:
+		// For any other colors, use a default gray
+		return tcell.ColorGray
 	}
 }
 

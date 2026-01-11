@@ -14,7 +14,7 @@ type MatrixColumn struct {
 	speed    int
 }
 
-func runMatrixRain(screen tcell.Screen, sigChan chan os.Signal) {
+func runMatrixRain(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
 	w, h := screen.Size()
 	columns := make([]MatrixColumn, w)
 
@@ -30,8 +30,8 @@ func runMatrixRain(screen tcell.Screen, sigChan chan os.Signal) {
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 
-	style := tcell.StyleDefault.Foreground(tcell.ColorGreen).Background(tcell.ColorBlack)
-	brightStyle := tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorBlack)
+	style := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorGreen, grayscale)).Background(tcell.ColorBlack)
+	brightStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorWhite, grayscale)).Background(tcell.ColorBlack)
 
 	// Event handling for resize
 	eventChan := make(chan tcell.Event, 10)
@@ -84,7 +84,7 @@ func runMatrixRain(screen tcell.Screen, sigChan chan os.Signal) {
 						if i == len(col.chars)-1 {
 							charStyle = brightStyle
 						} else if i > len(col.chars)-5 {
-							charStyle = tcell.StyleDefault.Foreground(tcell.ColorLime).Background(tcell.ColorBlack)
+							charStyle = tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorLime, grayscale)).Background(tcell.ColorBlack)
 						}
 						screen.SetContent(x, y, char, nil, charStyle)
 					}

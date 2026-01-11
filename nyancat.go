@@ -16,7 +16,7 @@ var rainbow = []tcell.Color{
 	tcell.ColorPurple,
 }
 
-func runNyancat(screen tcell.Screen, sigChan chan os.Signal) {
+func runNyancat(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
 	w, h := screen.Size()
 
 	// Nyancat sprite (simplified ASCII art)
@@ -63,7 +63,7 @@ func runNyancat(screen tcell.Screen, sigChan chan os.Signal) {
 			for i := 0; i < w; i++ {
 				if x-i >= 0 && x-i < len(rainbow)*3 {
 					color := rainbow[(x-i)/3%len(rainbow)]
-					style := tcell.StyleDefault.Foreground(color).Background(tcell.ColorBlack)
+					style := tcell.StyleDefault.Foreground(toGrayscale(color, grayscale)).Background(tcell.ColorBlack)
 					for j := 0; j < 3; j++ {
 						if catY+j < h && catY+j >= 0 {
 							screen.SetContent(i, catY+j, '▔', nil, style)
@@ -80,7 +80,7 @@ func runNyancat(screen tcell.Screen, sigChan chan os.Signal) {
 					for j, char := range line {
 						px := catX + j
 						if px >= 0 && px < w {
-							style := tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorBlack)
+							style := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorWhite, grayscale)).Background(tcell.ColorBlack)
 							screen.SetContent(px, y, char, nil, style)
 						}
 					}
@@ -91,7 +91,7 @@ func runNyancat(screen tcell.Screen, sigChan chan os.Signal) {
 			for i := 0; i < 20; i++ {
 				sx := (x + i*7) % w
 				sy := (i * 3) % h
-				style := tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorBlack)
+				style := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorWhite, grayscale)).Background(tcell.ColorBlack)
 				screen.SetContent(sx, sy, '*', nil, style)
 			}
 

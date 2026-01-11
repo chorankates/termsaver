@@ -43,7 +43,7 @@ type MissileDefender struct {
 	missilesDestroyed int
 }
 
-func runMissileDefender(screen tcell.Screen, sigChan chan os.Signal) {
+func runMissileDefender(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
 	w, h := screen.Size()
 	rand.Seed(time.Now().UnixNano())
 
@@ -105,7 +105,7 @@ func runMissileDefender(screen tcell.Screen, sigChan chan os.Signal) {
 			game.update(w, h)
 
 			// Draw
-			game.draw(screen, w, h)
+			game.draw(screen, w, h, grayscale)
 			screen.Show()
 		}
 	}
@@ -344,11 +344,11 @@ func (g *MissileDefender) update(w, h int) {
 	g.projectiles = newProjectiles
 }
 
-func (g *MissileDefender) draw(screen tcell.Screen, w, h int) {
+func (g *MissileDefender) draw(screen tcell.Screen, w, h int, grayscale bool) {
 	screen.Clear()
 
 	// Draw border
-	borderStyle := tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorBlack)
+	borderStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorWhite, grayscale)).Background(tcell.ColorBlack)
 	for x := 0; x < w; x++ {
 		screen.SetContent(x, 0, '─', nil, borderStyle)
 		screen.SetContent(x, h-1, '─', nil, borderStyle)
@@ -364,13 +364,13 @@ func (g *MissileDefender) draw(screen tcell.Screen, w, h int) {
 
 	// Draw solid green ground line at the bottom
 	groundY := h - 2
-	groundStyle := tcell.StyleDefault.Foreground(tcell.ColorGreen).Background(tcell.ColorBlack)
+	groundStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorGreen, grayscale)).Background(tcell.ColorBlack)
 	for x := 1; x < w-1; x++ {
 		screen.SetContent(x, groundY, '─', nil, groundStyle)
 	}
 
 	// Draw terrain (optional, can be removed or kept for variety)
-	terrainStyle := tcell.StyleDefault.Foreground(tcell.ColorYellow).Background(tcell.ColorBlack)
+	terrainStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorYellow, grayscale)).Background(tcell.ColorBlack)
 	for _, t := range g.terrain {
 		if t.Pos.Y < groundY {
 			screen.SetContent(t.Pos.X, t.Pos.Y, '▓', nil, terrainStyle)
@@ -378,14 +378,14 @@ func (g *MissileDefender) draw(screen tcell.Screen, w, h int) {
 	}
 
 	// Draw bases on the bottom (yellow triangles on green ground)
-	baseStyle := tcell.StyleDefault.Foreground(tcell.ColorYellow).Background(tcell.ColorBlack)
+	baseStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorYellow, grayscale)).Background(tcell.ColorBlack)
 	for _, base := range g.bases {
 		// Draw base on the ground line (one row above the ground line so it sits on top)
 		screen.SetContent(base.Pos.X, base.Pos.Y-1, '▲', nil, baseStyle)
 	}
 
 	// Draw missiles falling from sky as cyan lines
-	missileStyle := tcell.StyleDefault.Foreground(tcell.ColorBlue).Background(tcell.ColorBlack)
+	missileStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorBlue, grayscale)).Background(tcell.ColorBlack)
 	for _, missile := range g.missiles {
 		if missile.Alive {
 			// Draw line from previous position to current position
@@ -394,7 +394,7 @@ func (g *MissileDefender) draw(screen tcell.Screen, w, h int) {
 	}
 
 	// Draw projectiles (defensive shots) - white dots
-	projectileStyle := tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorBlack)
+	projectileStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorWhite, grayscale)).Background(tcell.ColorBlack)
 	for _, proj := range g.projectiles {
 		if proj.Alive {
 			screen.SetContent(proj.Pos.X, proj.Pos.Y, '*', nil, projectileStyle)
@@ -403,7 +403,7 @@ func (g *MissileDefender) draw(screen tcell.Screen, w, h int) {
 
 	// Draw score in cyan
 	scoreStr := fmt.Sprintf("SCORE= %d", g.score)
-	scoreStyle := tcell.StyleDefault.Foreground(tcell.ColorBlue).Background(tcell.ColorBlack)
+	scoreStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorBlue, grayscale)).Background(tcell.ColorBlack)
 	for i, char := range scoreStr {
 		if i+1 < w {
 			screen.SetContent(i+1, 1, char, nil, scoreStyle)

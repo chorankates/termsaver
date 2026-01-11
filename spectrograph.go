@@ -16,7 +16,7 @@ type SpectrographBar struct {
 	color         tcell.Color
 }
 
-func runSpectrograph(screen tcell.Screen, sigChan chan os.Signal) {
+func runSpectrograph(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
 	w, h := screen.Size()
 
 	// Define a palette of vibrant colors for the bars
@@ -52,12 +52,16 @@ func runSpectrograph(screen tcell.Screen, sigChan chan os.Signal) {
 
 	// Initialize bars with different frequencies, phases, and colors
 	for i := range bars {
-		bars[i] = SpectrographBar{
-			baseFrequency: 0.05 + float64(i)*0.03 + rand.Float64()*0.02,
-			phase:         float64(i) * 0.5,
-			amplitude:     0.5 + rand.Float64()*0.5,
-			color:         colors[i%len(colors)],
-		}
+				color := colors[i%len(colors)]
+				if grayscale {
+					color = toGrayscale(color, grayscale)
+				}
+				bars[i] = SpectrographBar{
+					baseFrequency: 0.05 + float64(i)*0.03 + rand.Float64()*0.02,
+					phase:         float64(i) * 0.5,
+					amplitude:     0.5 + rand.Float64()*0.5,
+					color:         color,
+				}
 	}
 
 	ticker := time.NewTicker(30 * time.Millisecond) // Fast updates for smooth animation
@@ -96,11 +100,15 @@ func runSpectrograph(screen tcell.Screen, sigChan chan os.Signal) {
 					if i < len(bars) {
 						newBars[i] = bars[i]
 					} else {
+						color := colors[i%len(colors)]
+						if grayscale {
+							color = toGrayscale(color, grayscale)
+						}
 						newBars[i] = SpectrographBar{
 							baseFrequency: 0.05 + float64(i)*0.03 + rand.Float64()*0.02,
 							phase:         float64(i) * 0.5,
 							amplitude:     0.5 + rand.Float64()*0.5,
-							color:         colors[i%len(colors)],
+							color:         color,
 						}
 					}
 				}
@@ -138,7 +146,7 @@ func runSpectrograph(screen tcell.Screen, sigChan chan os.Signal) {
 				barY := h - 1 // Start from bottom
 
 				// Create style for this bar
-				style := tcell.StyleDefault.Foreground(bar.color).Background(tcell.ColorBlack)
+				style := tcell.StyleDefault.Foreground(toGrayscale(bar.color, grayscale)).Background(tcell.ColorBlack)
 
 				// Draw the bar upward from the bottom
 				heightPixels := int(barHeight)
@@ -184,7 +192,7 @@ func runSpectrograph(screen tcell.Screen, sigChan chan os.Signal) {
 							if elapsed*10.0+float64(i) > 0 && int(elapsed*10.0+float64(i))%3 == 0 {
 								sparkleChar = '*'
 							}
-							sparkleStyle := tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorBlack)
+							sparkleStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorWhite, grayscale)).Background(tcell.ColorBlack)
 							screen.SetContent(x, sparkleY, sparkleChar, nil, sparkleStyle)
 						}
 					}
@@ -193,7 +201,7 @@ func runSpectrograph(screen tcell.Screen, sigChan chan os.Signal) {
 
 			// Fill remaining pixels with animated background pattern
 			// This ensures maximum pixel changes for screensaver purposes
-			bgStyle := tcell.StyleDefault.Foreground(tcell.ColorDarkGray).Background(tcell.ColorBlack)
+			bgStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorDarkGray, grayscale)).Background(tcell.ColorBlack)
 			patternTime := int(elapsed * 10)
 			for y := 0; y < h; y++ {
 				for x := 0; x < w; x++ {
