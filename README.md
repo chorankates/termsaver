@@ -8,6 +8,7 @@ A terminal screensaver with multiple visualizations, written in Go.
 - **Nyancat**: Animated rainbow-trailing cat flying through space
 - **Snake**: Classic Nokia-style snake game (use arrow keys to play)
 - **Missile Defender**: Automatic tower defense game where towers defend against incoming missiles (towers and terrain randomize every 30-45 seconds)
+- **Spectrograph**: Fake audio spectrograph with animated colored bars that continuously change for screensaver purposes
 
 ## Installation
 
@@ -70,11 +71,12 @@ Run the screensaver with a specific mode:
 ./termsaver -mode snake    # Snake game (automatic by default)
 ./termsaver -mode snake -interactive  # Snake game with manual control
 ./termsaver -mode missiledefender  # Tower defense game (fully automatic)
+./termsaver -mode spectrograph  # Fake audio spectrograph with animated colored bars
 ```
 
 ### Controls
 
-- **Matrix/Nyancat**: Press `Esc` or `Ctrl+C` to exit
+- **Matrix/Nyancat/Spectrograph**: Press `Esc` or `Ctrl+C` to exit
 - **Snake (interactive mode)**: Use arrow keys to control the snake, `Esc` or `Ctrl+C` to exit
 - **Snake (automatic mode, default)**: The snake plays perfectly by itself using pathfinding AI
 - **Missile Defender**: Fully automatic - the program plays both attack and defense sides. Press `Esc` or `Ctrl+C` to exit
