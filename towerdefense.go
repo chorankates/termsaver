@@ -25,9 +25,8 @@ type Enemy struct {
 	alive    bool
 }
 
-type Terrain struct {
-	pos Point
-	blocking bool
+type TowerTerrain struct {
+	Pos Point
 }
 
 func runTowerDefense(screen tcell.Screen, sigChan chan os.Signal) {
@@ -36,7 +35,7 @@ func runTowerDefense(screen tcell.Screen, sigChan chan os.Signal) {
 	// Game state
 	towers := []Tower{}
 	enemies := []Enemy{}
-	terrain := []Terrain{}
+	terrain := []TowerTerrain{}
 	path := []Point{}
 	wave := 0
 	score := 0
@@ -177,11 +176,7 @@ func runTowerDefense(screen tcell.Screen, sigChan chan os.Signal) {
 			// Draw terrain
 			terrainStyle := tcell.StyleDefault.Foreground(tcell.ColorDarkGray).Background(tcell.ColorBlack)
 			for _, t := range terrain {
-				if t.blocking {
-					screen.SetContent(t.pos.X, t.pos.Y, '▓', nil, terrainStyle)
-				} else {
-					screen.SetContent(t.pos.X, t.pos.Y, '·', nil, terrainStyle)
-				}
+				screen.SetContent(t.Pos.X, t.Pos.Y, '▓', nil, terrainStyle)
 			}
 			
 			// Draw path
@@ -238,7 +233,8 @@ func runTowerDefense(screen tcell.Screen, sigChan chan os.Signal) {
 					}
 					
 					if closestEnemy >= 0 {
-						drawLine(screen, tower.pos, enemies[closestEnemy].pos, tcell.ColorWhite)
+						lineStyle := tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorBlack)
+						drawLine(screen, tower.pos, enemies[closestEnemy].pos, lineStyle)
 					}
 				}
 			}
@@ -312,9 +308,9 @@ func generatePath(w, h int) []Point {
 	return path
 }
 
-func generateLayout(w, h int, path []Point) ([]Tower, []Terrain) {
+func generateLayout(w, h int, path []Point) ([]Tower, []TowerTerrain) {
 	towers := []Tower{}
-	terrain := []Terrain{}
+	terrain := []TowerTerrain{}
 	
 	// Create a set of path points to avoid placing towers/terrain on path
 	pathSet := make(map[Point]bool)
@@ -338,9 +334,8 @@ func generateLayout(w, h int, path []Point) ([]Tower, []Terrain) {
 			pos := Point{x, y}
 			
 			if !pathSet[pos] {
-				terrain = append(terrain, Terrain{
-					pos:      pos,
-					blocking: rand.Float32() < 0.7, // 70% blocking, 30% decorative
+				terrain = append(terrain, TowerTerrain{
+					Pos: pos,
 				})
 				pathSet[pos] = true
 				break
@@ -376,47 +371,4 @@ func generateLayout(w, h int, path []Point) ([]Tower, []Terrain) {
 	return towers, terrain
 }
 
-func drawLine(screen tcell.Screen, p1, p2 Point, color tcell.Color) {
-	w, h := screen.Size()
-	dx := abs(p2.X - p1.X)
-	dy := abs(p2.Y - p1.Y)
-	
-	var sx, sy int
-	if p1.X < p2.X {
-		sx = 1
-	} else {
-		sx = -1
-	}
-	if p1.Y < p2.Y {
-		sy = 1
-	} else {
-		sy = -1
-	}
-	
-	err := dx - dy
-	x, y := p1.X, p1.Y
-	
-	for i := 0; i < 10 && (x != p2.X || y != p2.Y); i++ {
-		if x >= 0 && x < w && y >= 0 && y < h {
-			screen.SetContent(x, y, '•', nil, tcell.StyleDefault.Foreground(color).Background(tcell.ColorBlack))
-		}
-		
-		e2 := 2 * err
-		if e2 > -dy {
-			err -= dy
-			x += sx
-		}
-		if e2 < dx {
-			err += dx
-			y += sy
-		}
-	}
-}
-
-func abs(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
-}
 
