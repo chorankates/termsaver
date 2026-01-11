@@ -19,7 +19,7 @@ type Snake struct {
 	alive     bool
 }
 
-func runSnake(screen tcell.Screen, sigChan chan os.Signal) {
+func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool) {
 	w, h := screen.Size()
 
 	// Initialize snake in center
@@ -54,25 +54,30 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal) {
 		case event := <-eventChan:
 			switch ev := event.(type) {
 			case *tcell.EventKey:
-				switch ev.Key() {
-				case tcell.KeyUp, tcell.KeyCtrlP:
-					if snake.direction.Y == 0 {
-						snake.direction = Point{0, -1}
-					}
-				case tcell.KeyDown, tcell.KeyCtrlN:
-					if snake.direction.Y == 0 {
-						snake.direction = Point{0, 1}
-					}
-				case tcell.KeyLeft, tcell.KeyCtrlB:
-					if snake.direction.X == 0 {
-						snake.direction = Point{-1, 0}
-					}
-				case tcell.KeyRight, tcell.KeyCtrlF:
-					if snake.direction.X == 0 {
-						snake.direction = Point{1, 0}
-					}
-				case tcell.KeyEscape, tcell.KeyCtrlC:
+				// Always handle exit keys, regardless of interactive mode
+				if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
 					return
+				}
+				// Handle movement keys only in interactive mode
+				if interactive {
+					switch ev.Key() {
+					case tcell.KeyUp, tcell.KeyCtrlP:
+						if snake.direction.Y == 0 {
+							snake.direction = Point{0, -1}
+						}
+					case tcell.KeyDown, tcell.KeyCtrlN:
+						if snake.direction.Y == 0 {
+							snake.direction = Point{0, 1}
+						}
+					case tcell.KeyLeft, tcell.KeyCtrlB:
+						if snake.direction.X == 0 {
+							snake.direction = Point{-1, 0}
+						}
+					case tcell.KeyRight, tcell.KeyCtrlF:
+						if snake.direction.X == 0 {
+							snake.direction = Point{1, 0}
+						}
+					}
 				}
 			case *tcell.EventResize:
 				w, h = screen.Size()
@@ -96,6 +101,11 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal) {
 				}
 				screen.Show()
 				continue
+			}
+
+			// Automatic gameplay: calculate optimal direction
+			if !interactive {
+				snake.direction = findOptimalDirection(snake, food, w, h)
 			}
 
 			// Move snake
@@ -195,5 +205,109 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal) {
 			screen.Show()
 		}
 	}
+}
+
+// findOptimalDirection uses BFS pathfinding to find the best direction to the food
+func findOptimalDirection(snake Snake, food Point, w, h int) Point {
+	head := snake.body[0]
+
+	// Create a set of occupied cells (snake body)
+	occupied := make(map[Point]bool)
+	for _, segment := range snake.body {
+		occupied[segment] = true
+	}
+
+	// BFS to find shortest path to food
+	directions := []Point{{0, -1}, {0, 1}, {-1, 0}, {1, 0}}
+	type node struct {
+		pos       Point
+		firstDir  Point
+	}
+
+	queue := []node{{head, Point{}}}
+	visited := make(map[Point]bool)
+	visited[head] = true
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		if current.pos.X == food.X && current.pos.Y == food.Y {
+			// Found path to food, return first direction
+			if current.firstDir.X != 0 || current.firstDir.Y != 0 {
+				return current.firstDir
+			}
+			// If we're already at food, just continue in current direction
+			return snake.direction
+		}
+
+		for _, dir := range directions {
+			next := Point{
+				X: current.pos.X + dir.X,
+				Y: current.pos.Y + dir.Y,
+			}
+
+			// Check bounds (account for border)
+			if next.X <= 0 || next.X >= w-1 || next.Y <= 0 || next.Y >= h-1 {
+				continue
+			}
+
+			// Check if visited or occupied (except tail, which will move)
+			tail := snake.body[len(snake.body)-1]
+			if visited[next] || (occupied[next] && next != tail) {
+				continue
+			}
+
+			// Don't reverse direction (only for first step from head)
+			if current.pos == head {
+				if snake.direction.X != 0 && dir.X == -snake.direction.X {
+					continue
+				}
+				if snake.direction.Y != 0 && dir.Y == -snake.direction.Y {
+					continue
+				}
+			}
+
+			visited[next] = true
+			firstDir := current.firstDir
+			if firstDir.X == 0 && firstDir.Y == 0 {
+				firstDir = dir
+			}
+			queue = append(queue, node{next, firstDir})
+		}
+	}
+
+	// If no path to food found, use a safe movement strategy
+	// Try to avoid walls and self
+	for _, dir := range directions {
+		next := Point{
+			X: head.X + dir.X,
+			Y: head.Y + dir.Y,
+		}
+
+		// Check bounds
+		if next.X <= 0 || next.X >= w-1 || next.Y <= 0 || next.Y >= h-1 {
+			continue
+		}
+
+		// Check if occupied (except tail)
+		tail := snake.body[len(snake.body)-1]
+		if occupied[next] && next != tail {
+			continue
+		}
+
+		// Don't reverse
+		if snake.direction.X != 0 && dir.X == -snake.direction.X {
+			continue
+		}
+		if snake.direction.Y != 0 && dir.Y == -snake.direction.Y {
+			continue
+		}
+
+		return dir
+	}
+
+	// Fallback: continue in current direction
+	return snake.direction
 }
 

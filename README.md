@@ -66,13 +66,15 @@ Run the screensaver with a specific mode:
 ```bash
 ./termsaver -mode matrix   # Matrix rain effect
 ./termsaver -mode nyancat  # Flying rainbow cat
-./termsaver -mode snake    # Snake game
+./termsaver -mode snake    # Snake game (automatic by default)
+./termsaver -mode snake -interactive  # Snake game with manual control
 ```
 
 ### Controls
 
 - **Matrix/Nyancat**: Press `Esc` or `Ctrl+C` to exit
-- **Snake**: Use arrow keys to control the snake, `Esc` or `Ctrl+C` to exit
+- **Snake (interactive mode)**: Use arrow keys to control the snake, `Esc` or `Ctrl+C` to exit
+- **Snake (automatic mode, default)**: The snake plays perfectly by itself using pathfinding AI
 
 ## Requirements
 

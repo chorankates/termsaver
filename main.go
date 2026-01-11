@@ -12,6 +12,7 @@ import (
 
 func main() {
 	var mode = flag.String("mode", "matrix", "Visualization mode: matrix, nyancat, or snake")
+	var interactive = flag.Bool("interactive", false, "Enable interactive mode (for snake: use arrow keys to play)")
 	flag.Parse()
 
 	screen, err := tcell.NewScreen()
@@ -37,7 +38,7 @@ func main() {
 	case "nyancat":
 		runNyancat(screen, sigChan)
 	case "snake":
-		runSnake(screen, sigChan)
+		runSnake(screen, sigChan, *interactive)
 	default:
 		screen.Fini()
 		fmt.Fprintf(os.Stderr, "Unknown mode: %s. Use: matrix, nyancat, or snake\n", *mode)
