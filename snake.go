@@ -35,6 +35,7 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool, gra
 
 	food := Point{1 + (w-2)/4, 1 + (h-2)/4}
 	score := 0
+	var gameOverTime time.Time
 
 	ticker := time.NewTicker(150 * time.Millisecond)
 	defer ticker.Stop()
@@ -85,20 +86,62 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool, gra
 			}
 		case <-ticker.C:
 			if !snake.alive {
-				// Game over - wait for exit
+				// Track when game over started
+				if gameOverTime.IsZero() {
+					gameOverTime = time.Now()
+				}
+				
+				// Calculate countdown (3, 2, 1, 0)
+				elapsed := time.Since(gameOverTime)
+				countdown := 3 - int(elapsed.Seconds())
+				
 				screen.Clear()
-				msg := fmt.Sprintf("GAME OVER - Score: %d", score)
-				x := (w - len(msg)) / 2
-				if x < 0 {
-					x = 0
-				}
-				y := h / 2
-				style := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorRed, grayscale)).Background(tcell.ColorBlack)
-				for i, char := range msg {
-					if x+i >= 0 && x+i < w {
-						screen.SetContent(x+i, y, char, nil, style)
+				
+				if countdown > 0 {
+					// Show countdown
+					msg1 := fmt.Sprintf("GAME OVER - Score: %d", score)
+					countdownMsg := fmt.Sprintf("Restarting in %d...", countdown)
+					
+					x1 := (w - len(msg1)) / 2
+					if x1 < 0 {
+						x1 = 0
 					}
+					x2 := (w - len(countdownMsg)) / 2
+					if x2 < 0 {
+						x2 = 0
+					}
+					
+					style1 := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorRed, grayscale)).Background(tcell.ColorBlack)
+					style2 := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorYellow, grayscale)).Background(tcell.ColorBlack)
+					
+					for i, char := range msg1 {
+						if x1+i >= 0 && x1+i < w {
+							screen.SetContent(x1+i, h/2-1, char, nil, style1)
+						}
+					}
+					for i, char := range countdownMsg {
+						if x2+i >= 0 && x2+i < w {
+							screen.SetContent(x2+i, h/2+1, char, nil, style2)
+						}
+					}
+				} else {
+					// Countdown finished - restart the game
+					w, h = screen.Size()
+					snake = Snake{
+						body: []Point{
+							{w / 2, h / 2},
+							{w/2 - 1, h / 2},
+							{w/2 - 2, h / 2},
+						},
+						direction: Point{1, 0},
+						alive:     true,
+					}
+					food = Point{1 + (w-2)/4, 1 + (h-2)/4}
+					score = 0
+					gameOverTime = time.Time{}
+					continue
 				}
+				
 				screen.Show()
 				continue
 			}

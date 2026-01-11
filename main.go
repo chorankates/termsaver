@@ -3,15 +3,17 @@ package main
 import (
 	"flag"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 )
 
 func main() {
-	var mode = flag.String("mode", "matrix", "Visualization mode: matrix, nyancat, snake, missiledefender, spectrograph, or snowflakes")
+	var mode = flag.String("mode", "matrix", "Visualization mode: matrix, nyancat, snake, missiledefender, spectrograph, snowflakes, or random")
 	var interactive = flag.Bool("interactive", false, "Enable interactive mode (for snake: use arrow keys to play)")
 	var grayscale = flag.Bool("grayscale", false, "Use grayscale colors instead of colors")
 	flag.Parse()
@@ -32,8 +34,16 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
+	// Handle random mode selection
+	selectedMode := *mode
+	if selectedMode == "random" {
+		modes := []string{"matrix", "nyancat", "snake", "missiledefender", "spectrograph", "snowflakes"}
+		rand.Seed(time.Now().UnixNano())
+		selectedMode = modes[rand.Intn(len(modes))]
+	}
+
 	// Start the selected visualization
-	switch *mode {
+	switch selectedMode {
 	case "matrix":
 		runMatrixRain(screen, sigChan, *grayscale)
 	case "nyancat":
@@ -48,7 +58,7 @@ func main() {
 		runSnowflakes(screen, sigChan, *grayscale)
 	default:
 		screen.Fini()
-		fmt.Fprintf(os.Stderr, "Unknown mode: %s. Use: matrix, nyancat, snake, missiledefender, spectrograph, or snowflakes\n", *mode)
+		fmt.Fprintf(os.Stderr, "Unknown mode: %s. Use: matrix, nyancat, snake, missiledefender, spectrograph, snowflakes, or random\n", *mode)
 		os.Exit(1)
 	}
 }
