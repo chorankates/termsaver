@@ -13,7 +13,7 @@ import (
 )
 
 func main() {
-	var mode = flag.String("mode", "matrix", "Visualization mode: matrix, nyancat, snake, missiledefender, spectrograph, snowflakes, or random")
+	var mode = flag.String("mode", "random", "Visualization mode: matrix, nyancat, snake, missiledefender, spectrograph, snowflakes, or random")
 	var interactive = flag.Bool("interactive", false, "Enable interactive mode (for snake: use arrow keys to play)")
 	var grayscale = flag.Bool("grayscale", false, "Use grayscale colors instead of colors")
 	flag.Parse()
