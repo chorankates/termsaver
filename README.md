@@ -12,6 +12,7 @@ a terminal screensaver with multiple visualizations
 | `missiledefender` | automatic tower defense game where towers defend against incoming missiles (towers and terrain randomize every 30-45 seconds) | 
 | `spectrogragraph` | fake audio spectrograph with animated colored bars that continuously change                                                   |
 | `snowflakes`      | falling snow that accumulates at the bottom and clears periodically                                                          |
+| `waterripple`     | water drop rippling outwards from the center of the terminal                                                                 |
 | `random`          | randomly selects one of the available modes                                                                                  | 
 
 ## usage
@@ -24,5 +25,6 @@ a terminal screensaver with multiple visualizations
 ./termsaver -mode missiledefender  # Tower defense game (fully automatic)
 ./termsaver -mode spectrograph  # Fake audio spectrograph with animated colored bars
 ./termsaver -mode snowflakes    # Falling snow that accumulates and clears periodically
+./termsaver -mode waterripple   # Water drop rippling outwards from the center
 ./termsaver -mode random        # Randomly selects one of the available modes
 ```

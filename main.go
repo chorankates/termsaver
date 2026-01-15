@@ -13,7 +13,7 @@ import (
 )
 
 func main() {
-	var mode = flag.String("mode", "random", "Visualization mode: matrix, nyancat, snake, missiledefender, spectrograph, snowflakes, or random")
+	var mode = flag.String("mode", "random", "Visualization mode: matrix, nyancat, snake, missiledefender, spectrograph, snowflakes, waterripple, or random")
 	var interactive = flag.Bool("interactive", false, "Enable interactive mode (for snake: use arrow keys to play)")
 	var grayscale = flag.Bool("grayscale", false, "Use grayscale colors instead of colors")
 	flag.Parse()
@@ -37,7 +37,7 @@ func main() {
 	// Handle random mode selection
 	selectedMode := *mode
 	if selectedMode == "random" {
-		modes := []string{"matrix", "nyancat", "snake", "missiledefender", "spectrograph", "snowflakes"}
+		modes := []string{"matrix", "nyancat", "snake", "missiledefender", "spectrograph", "snowflakes", "waterripple"}
 		rand.Seed(time.Now().UnixNano())
 		selectedMode = modes[rand.Intn(len(modes))]
 	}
@@ -56,9 +56,11 @@ func main() {
 		runSpectrograph(screen, sigChan, *grayscale)
 	case "snowflakes":
 		runSnowflakes(screen, sigChan, *grayscale)
+	case "waterripple":
+		runWaterRipple(screen, sigChan, *grayscale)
 	default:
 		screen.Fini()
-		fmt.Fprintf(os.Stderr, "Unknown mode: %s. Use: matrix, nyancat, snake, missiledefender, spectrograph, snowflakes, or random\n", *mode)
+		fmt.Fprintf(os.Stderr, "Unknown mode: %s. Use: matrix, nyancat, snake, missiledefender, spectrograph, snowflakes, waterripple, or random\n", *mode)
 		os.Exit(1)
 	}
 }
