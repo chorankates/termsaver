@@ -9,9 +9,10 @@ import (
 )
 
 type Snowflake struct {
-	x      int
+	x      float64
 	y      float64
 	speed  float64
+	windX  float64 // Horizontal drift due to wind
 	active bool
 }
 
@@ -28,6 +29,10 @@ func runSnowflakes(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) 
 	// Snowflakes falling
 	snowflakes := make([]Snowflake, 0)
 	maxSnowflakes := w / 2 // Limit number of active snowflakes
+
+	// Wind simulation - changes over time
+	globalWind := 0.0 // Global wind direction (-1 to 1, negative = left, positive = right)
+	windChangeTimer := 0
 
 	ticker := time.NewTicker(100 * time.Millisecond) // Snow falls slower than matrix
 	defer ticker.Stop()
@@ -66,7 +71,7 @@ func runSnowflakes(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) 
 				// Remove snowflakes that are out of bounds
 				validSnowflakes := make([]Snowflake, 0)
 				for _, flake := range snowflakes {
-					if flake.x >= 0 && flake.x < w && flake.y >= 0 && int(flake.y) < h {
+					if int(flake.x) >= 0 && int(flake.x) < w && flake.y >= 0 && int(flake.y) < h {
 						validSnowflakes = append(validSnowflakes, flake)
 					}
 				}
@@ -80,6 +85,18 @@ func runSnowflakes(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) 
 				}
 			}
 		case <-ticker.C:
+			// Update wind over time (gradual changes)
+			windChangeTimer++
+			if windChangeTimer >= 30 { // Change wind direction every 3 seconds
+				// Wind gradually shifts between -0.8 and 0.8
+				globalWind = (rand.Float64() - 0.5) * 1.6
+				windChangeTimer = 0
+			} else {
+				// Smooth wind transitions
+				targetWind := (rand.Float64() - 0.5) * 1.6
+				globalWind = globalWind*0.95 + targetWind*0.05
+			}
+
 			// Check if we should clear accumulated snow
 			// Clear if any column has accumulated more than 50% of screen height
 			// (ground level less than 50% means more than 50% is filled)
@@ -100,10 +117,16 @@ func runSnowflakes(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) 
 
 			// Spawn new snowflakes
 			for len(snowflakes) < maxSnowflakes && rand.Float64() < 0.3 {
+				// Each snowflake has its own wind component (individual variation)
+				// plus the global wind effect
+				individualWind := (rand.Float64() - 0.5) * 0.3 // Small individual variation
+				totalWind := globalWind + individualWind
+				
 				snowflakes = append(snowflakes, Snowflake{
-					x:      rand.Intn(w),
+					x:      float64(rand.Intn(w)),
 					y:      0.0,
 					speed:  0.5 + rand.Float64()*0.5, // Speed between 0.5 and 1.0
+					windX:  totalWind,
 					active: true,
 				})
 			}
@@ -120,13 +143,32 @@ func runSnowflakes(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) 
 					snowflakes[i].y = 0
 				}
 
+				// Apply wind effect (horizontal movement)
+				// Wind effect is stronger at higher altitudes (more realistic)
+				windStrength := 1.0 - (snowflakes[i].y / float64(h)) // Stronger at top
+				snowflakes[i].x += snowflakes[i].windX * windStrength
+
+				// Wrap around screen edges horizontally
+				if snowflakes[i].x < 0 {
+					snowflakes[i].x += float64(w)
+				} else if snowflakes[i].x >= float64(w) {
+					snowflakes[i].x -= float64(w)
+				}
+
 				// Check if snowflake has reached the ground (or accumulated snow)
-				groundY := float64(groundLevel[snowflakes[i].x])
+				xPos := int(snowflakes[i].x)
+				if xPos < 0 {
+					xPos = 0
+				}
+				if xPos >= w {
+					xPos = w - 1
+				}
+				groundY := float64(groundLevel[xPos])
 				if snowflakes[i].y >= groundY {
 					// Snowflake has landed, accumulate it
 					// Raise the ground level for this column (decrement Y to move up)
-					if groundLevel[snowflakes[i].x] > 0 {
-						groundLevel[snowflakes[i].x]--
+					if groundLevel[xPos] > 0 {
+						groundLevel[xPos]--
 					}
 					// Remove this snowflake
 					snowflakes[i].active = false
@@ -160,13 +202,16 @@ func runSnowflakes(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) 
 			// Draw falling snowflakes
 			snowflakeChars := []rune{'*', '.', '+', '·'}
 			for _, flake := range snowflakes {
-				if flake.active && flake.x >= 0 && flake.x < w {
-					yPos := int(flake.y)
-					if yPos >= 0 && yPos < h {
-						// Only draw if not in accumulated snow area
-						if yPos < groundLevel[flake.x] {
-							char := snowflakeChars[flake.x%len(snowflakeChars)]
-							screen.SetContent(flake.x, yPos, char, nil, snowStyle)
+				if flake.active {
+					xPos := int(flake.x)
+					if xPos >= 0 && xPos < w {
+						yPos := int(flake.y)
+						if yPos >= 0 && yPos < h {
+							// Only draw if not in accumulated snow area
+							if yPos < groundLevel[xPos] {
+								char := snowflakeChars[xPos%len(snowflakeChars)]
+								screen.SetContent(xPos, yPos, char, nil, snowStyle)
+							}
 						}
 					}
 				}
