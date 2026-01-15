@@ -16,7 +16,7 @@ type Snowflake struct {
 	active bool
 }
 
-func runSnowflakes(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
+func runSnowflakes(screen tcell.Screen, sigChan chan os.Signal, grayscale bool, windChangeTime float64, windStrength float64) {
 	w, h := screen.Size()
 
 	// Track ground level for each column (Y coordinate where next snowflake lands)
@@ -33,8 +33,21 @@ func runSnowflakes(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) 
 	// Wind simulation - changes over time
 	globalWind := 0.0 // Global wind direction (-1 to 1, negative = left, positive = right)
 	windChangeTimer := 0
+	tickInterval := 100 * time.Millisecond
+	windChangeTicks := int(windChangeTime * float64(time.Second) / float64(tickInterval))
+	if windChangeTicks < 1 {
+		windChangeTicks = 1
+	}
+	// Clamp wind strength to reasonable range
+	if windStrength < 0 {
+		windStrength = 0
+	}
+	if windStrength > 1.0 {
+		windStrength = 1.0
+	}
+	windRange := windStrength * 2.0 // Total range from -windStrength to +windStrength
 
-	ticker := time.NewTicker(100 * time.Millisecond) // Snow falls slower than matrix
+	ticker := time.NewTicker(tickInterval) // Snow falls slower than matrix
 	defer ticker.Stop()
 
 	// Event handling for resize and exit
@@ -87,13 +100,13 @@ func runSnowflakes(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) 
 		case <-ticker.C:
 			// Update wind over time (gradual changes)
 			windChangeTimer++
-			if windChangeTimer >= 30 { // Change wind direction every 3 seconds
-				// Wind gradually shifts between -0.8 and 0.8
-				globalWind = (rand.Float64() - 0.5) * 1.6
+			if windChangeTimer >= windChangeTicks {
+				// Wind gradually shifts between -windStrength and +windStrength
+				globalWind = (rand.Float64() - 0.5) * windRange
 				windChangeTimer = 0
 			} else {
 				// Smooth wind transitions
-				targetWind := (rand.Float64() - 0.5) * 1.6
+				targetWind := (rand.Float64() - 0.5) * windRange
 				globalWind = globalWind*0.95 + targetWind*0.05
 			}
 
@@ -119,7 +132,8 @@ func runSnowflakes(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) 
 			for len(snowflakes) < maxSnowflakes && rand.Float64() < 0.3 {
 				// Each snowflake has its own wind component (individual variation)
 				// plus the global wind effect
-				individualWind := (rand.Float64() - 0.5) * 0.3 // Small individual variation
+				// Individual variation is proportional to wind strength
+				individualWind := (rand.Float64() - 0.5) * windStrength * 0.375 // Small individual variation (about 37.5% of baseline)
 				totalWind := globalWind + individualWind
 				
 				snowflakes = append(snowflakes, Snowflake{

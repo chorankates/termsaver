@@ -16,6 +16,8 @@ func main() {
 	var mode = flag.String("mode", "random", "Visualization mode: matrix, nyancat, snake, missiledefender, spectrograph, snowflakes, waterripple, or random")
 	var interactive = flag.Bool("interactive", false, "Enable interactive mode (for snake: use arrow keys to play)")
 	var grayscale = flag.Bool("grayscale", false, "Use grayscale colors instead of colors")
+	var windChangeTime = flag.Float64("wind-change-time", 3.0, "Time in seconds between wind direction changes (snowflakes mode)")
+	var windStrength = flag.Float64("wind-strength", 0.8, "Baseline wind strength (-1.0 to 1.0, snowflakes mode)")
 	flag.Parse()
 
 	screen, err := tcell.NewScreen()
@@ -55,7 +57,7 @@ func main() {
 	case "spectrograph":
 		runSpectrograph(screen, sigChan, *grayscale)
 	case "snowflakes":
-		runSnowflakes(screen, sigChan, *grayscale)
+		runSnowflakes(screen, sigChan, *grayscale, *windChangeTime, *windStrength)
 	case "waterripple":
 		runWaterRipple(screen, sigChan, *grayscale)
 	default:
