@@ -18,6 +18,8 @@ func main() {
 	var grayscale = flag.Bool("grayscale", false, "Use grayscale colors instead of colors")
 	var windChangeTime = flag.Float64("wind-change-time", 3.0, "Time in seconds between wind direction changes (snowflakes mode)")
 	var windStrength = flag.Float64("wind-strength", 0.8, "Baseline wind strength (-1.0 to 1.0, snowflakes mode)")
+	var snakeSize = flag.Int("snake-size", 0, "Snake game grid size (0 = auto based on terminal, max 50)")
+	var snakeScale = flag.Int("snake-scale", 2, "Snake cell scale factor (1-4, affects how large each cell appears)")
 	flag.Parse()
 
 	screen, err := tcell.NewScreen()
@@ -51,7 +53,7 @@ func main() {
 	case "nyancat":
 		runNyancat(screen, sigChan, *interactive, *grayscale)
 	case "snake":
-		runSnake(screen, sigChan, *interactive, *grayscale)
+		runSnake(screen, sigChan, *interactive, *grayscale, *snakeSize, *snakeScale)
 	case "missiledefender":
 		runMissileDefender(screen, sigChan, *interactive, *grayscale)
 	case "spectrograph":

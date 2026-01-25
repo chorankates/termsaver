@@ -19,21 +19,81 @@ type Snake struct {
 	alive     bool
 }
 
-func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool, grayscale bool) {
-	w, h := screen.Size()
+func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool, grayscale bool, requestedSize int, scale int) {
+	termW, termH := screen.Size()
 
-	// Initialize snake in center
+	// Clamp scale to reasonable values
+	if scale < 1 {
+		scale = 1
+	}
+	if scale > 4 {
+		scale = 4
+	}
+
+	// Cell size: each game cell is rendered as cellW x cellH terminal characters
+	// Using scale for width and scale/2 (min 1) for height to maintain roughly square cells
+	cellW := scale
+	cellH := scale / 2
+	if cellH < 1 {
+		cellH = 1
+	}
+
+	// Calculate game grid size (in game cells, not terminal chars)
+	// Default to a reasonable size based on terminal, capped at 50x50
+	gameSize := requestedSize
+	if gameSize <= 0 {
+		// Auto-size based on terminal, accounting for cell size
+		maxW := (termW * 8 / 10) / cellW
+		maxH := (termH * 8 / 10) / cellH
+		gameSize = maxW
+		if maxH < gameSize {
+			gameSize = maxH
+		}
+	}
+	if gameSize > 50 {
+		gameSize = 50
+	}
+	if gameSize < 10 {
+		gameSize = 10
+	}
+
+	// Game grid dimensions (in game cells, including border)
+	gameW := gameSize
+	gameH := gameSize
+
+	// Calculate pixel dimensions for centering
+	pixelW := gameW * cellW
+	pixelH := gameH * cellH
+
+	// Calculate offset to center the game area in terminal
+	offsetX := (termW - pixelW) / 2
+	offsetY := (termH - pixelH) / 2
+
+	// Helper function to draw a game cell as a block
+	drawCell := func(gx, gy int, ch rune, style tcell.Style) {
+		px := offsetX + gx*cellW
+		py := offsetY + gy*cellH
+		for dy := 0; dy < cellH; dy++ {
+			for dx := 0; dx < cellW; dx++ {
+				screen.SetContent(px+dx, py+dy, ch, nil, style)
+			}
+		}
+	}
+
+	// Initialize snake in center of game area
+	centerX := gameW / 2
+	centerY := gameH / 2
 	snake := Snake{
 		body: []Point{
-			{w / 2, h / 2},
-			{w/2 - 1, h / 2},
-			{w/2 - 2, h / 2},
+			{centerX, centerY},
+			{centerX - 1, centerY},
+			{centerX - 2, centerY},
 		},
 		direction: Point{1, 0},
 		alive:     true,
 	}
 
-	food := Point{1 + (w-2)/4, 1 + (h-2)/4}
+	food := Point{1 + (gameW-2)/4, 1 + (gameH-2)/4}
 	score := 0
 	var gameOverTime time.Time
 
@@ -85,7 +145,10 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool, gra
 					}
 				}
 			case *tcell.EventResize:
-				w, h = screen.Size()
+				termW, termH = screen.Size()
+				// Recalculate offset to keep game centered
+				offsetX = (termW - pixelW) / 2
+				offsetY = (termH - pixelH) / 2
 				screen.Sync()
 			}
 		case <-ticker.C:
@@ -106,11 +169,11 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool, gra
 					msg1 := fmt.Sprintf("GAME OVER - Score: %d", score)
 					countdownMsg := fmt.Sprintf("Restarting in %d...", countdown)
 					
-					x1 := (w - len(msg1)) / 2
+					x1 := (termW - len(msg1)) / 2
 					if x1 < 0 {
 						x1 = 0
 					}
-					x2 := (w - len(countdownMsg)) / 2
+					x2 := (termW - len(countdownMsg)) / 2
 					if x2 < 0 {
 						x2 = 0
 					}
@@ -119,28 +182,30 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool, gra
 					style2 := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorYellow, grayscale)).Background(tcell.ColorBlack)
 					
 					for i, char := range msg1 {
-						if x1+i >= 0 && x1+i < w {
-							screen.SetContent(x1+i, h/2-1, char, nil, style1)
+						if x1+i >= 0 && x1+i < termW {
+							screen.SetContent(x1+i, termH/2-1, char, nil, style1)
 						}
 					}
 					for i, char := range countdownMsg {
-						if x2+i >= 0 && x2+i < w {
-							screen.SetContent(x2+i, h/2+1, char, nil, style2)
+						if x2+i >= 0 && x2+i < termW {
+							screen.SetContent(x2+i, termH/2+1, char, nil, style2)
 						}
 					}
 				} else {
 					// Countdown finished - restart the game
-					w, h = screen.Size()
+					termW, termH = screen.Size()
+					offsetX = (termW - pixelW) / 2
+					offsetY = (termH - pixelH) / 2
 					snake = Snake{
 						body: []Point{
-							{w / 2, h / 2},
-							{w/2 - 1, h / 2},
-							{w/2 - 2, h / 2},
+							{centerX, centerY},
+							{centerX - 1, centerY},
+							{centerX - 2, centerY},
 						},
 						direction: Point{1, 0},
 						alive:     true,
 					}
-					food = Point{1 + (w-2)/4, 1 + (h-2)/4}
+					food = Point{1 + (gameW-2)/4, 1 + (gameH-2)/4}
 					score = 0
 					gameOverTime = time.Time{}
 					continue
@@ -152,7 +217,7 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool, gra
 
 			// Automatic gameplay: calculate optimal direction
 			if !interactive {
-				snake.direction = findOptimalDirection(snake, food, w, h)
+				snake.direction = findOptimalDirection(snake, food, gameW, gameH)
 			}
 
 			// Move snake
@@ -163,7 +228,7 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool, gra
 			}
 
 			// Check wall collision (account for border)
-			if newHead.X <= 0 || newHead.X >= w-1 || newHead.Y <= 0 || newHead.Y >= h-1 {
+			if newHead.X <= 0 || newHead.X >= gameW-1 || newHead.Y <= 0 || newHead.Y >= gameH-1 {
 				snake.alive = false
 				continue
 			}
@@ -186,7 +251,7 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool, gra
 			if newHead.X == food.X && newHead.Y == food.Y {
 				score++
 				// Generate new food (avoid border area)
-				food = Point{1 + rand.Intn(w-2), 1 + rand.Intn(h-2)}
+				food = Point{1 + rand.Intn(gameW-2), 1 + rand.Intn(gameH-2)}
 				// Make sure food is not on snake
 				for {
 					onSnake := false
@@ -199,7 +264,7 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool, gra
 					if !onSnake {
 						break
 					}
-					food = Point{1 + rand.Intn(w-2), 1 + rand.Intn(h-2)}
+					food = Point{1 + rand.Intn(gameW-2), 1 + rand.Intn(gameH-2)}
 				}
 			} else {
 				snake.body = snake.body[:len(snake.body)-1]
@@ -208,44 +273,50 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool, gra
 			// Draw
 			screen.Clear()
 
-			// Draw border
-			borderStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorWhite, grayscale)).Background(tcell.ColorBlack)
-			for x := 0; x < w; x++ {
-				screen.SetContent(x, 0, '─', nil, borderStyle)
-				screen.SetContent(x, h-1, '─', nil, borderStyle)
-			}
-			for y := 0; y < h; y++ {
-				screen.SetContent(0, y, '│', nil, borderStyle)
-				screen.SetContent(w-1, y, '│', nil, borderStyle)
-			}
-			screen.SetContent(0, 0, '┌', nil, borderStyle)
-			screen.SetContent(w-1, 0, '┐', nil, borderStyle)
-			screen.SetContent(0, h-1, '└', nil, borderStyle)
-			screen.SetContent(w-1, h-1, '┘', nil, borderStyle)
-
-			// Draw snake
-			snakeStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorGreen, grayscale)).Background(tcell.ColorBlack)
-			headStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorLime, grayscale)).Background(tcell.ColorBlack)
-			for i, segment := range snake.body {
-				char := '█'
-				if i == 0 {
-					char = '◉'
-					screen.SetContent(segment.X, segment.Y, char, nil, headStyle)
-				} else {
-					screen.SetContent(segment.X, segment.Y, char, nil, snakeStyle)
+			// Draw grid background - checkerboard pattern for visibility
+			gridLight := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorDarkGray, grayscale)).Background(tcell.ColorBlack)
+			gridDark := tcell.StyleDefault.Foreground(tcell.ColorBlack).Background(tcell.ColorBlack)
+			for y := 1; y < gameH-1; y++ {
+				for x := 1; x < gameW-1; x++ {
+					if (x+y)%2 == 0 {
+						drawCell(x, y, '·', gridLight)
+					} else {
+						drawCell(x, y, ' ', gridDark)
+					}
 				}
+			}
+
+			// Draw border using block characters
+			borderStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorWhite, grayscale)).Background(tcell.ColorBlack)
+			// Top and bottom borders
+			for x := 0; x < gameW; x++ {
+				drawCell(x, 0, '█', borderStyle)
+				drawCell(x, gameH-1, '█', borderStyle)
+			}
+			// Left and right borders
+			for y := 1; y < gameH-1; y++ {
+				drawCell(0, y, '█', borderStyle)
+				drawCell(gameW-1, y, '█', borderStyle)
+			}
+
+			// Draw snake (same character for head and body)
+			snakeStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorGreen, grayscale)).Background(tcell.ColorBlack)
+			for _, segment := range snake.body {
+				drawCell(segment.X, segment.Y, '█', snakeStyle)
 			}
 
 			// Draw food
 			foodStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorRed, grayscale)).Background(tcell.ColorBlack)
-			screen.SetContent(food.X, food.Y, '●', nil, foodStyle)
+			drawCell(food.X, food.Y, '█', foodStyle)
 
-			// Draw score
+			// Draw score above the game area
 			scoreStr := fmt.Sprintf("Score: %d", score)
 			scoreStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorYellow, grayscale)).Background(tcell.ColorBlack)
-			for i, char := range scoreStr {
-				if i+1 < w {
-					screen.SetContent(i+1, 1, char, nil, scoreStyle)
+			scoreX := offsetX + (pixelW-len(scoreStr))/2
+			scoreY := offsetY - 1
+			if scoreY >= 0 {
+				for i, char := range scoreStr {
+					screen.SetContent(scoreX+i, scoreY, char, nil, scoreStyle)
 				}
 			}
 
