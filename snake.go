@@ -39,35 +39,55 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool, gra
 	}
 
 	// Calculate game grid size (in game cells, not terminal chars)
-	// Default to a reasonable size based on terminal, capped at 50x50
-	gameSize := requestedSize
-	if gameSize <= 0 {
-		// Auto-size based on terminal, accounting for cell size
-		maxW := (termW * 8 / 10) / cellW
-		maxH := (termH * 8 / 10) / cellH
-		gameSize = maxW
-		if maxH < gameSize {
-			gameSize = maxH
+	// Default to a reasonable size based on terminal
+	var gameW, gameH int
+	var offsetX, offsetY int
+
+	if !interactive {
+		// Non-interactive mode: use entire terminal window
+		// Leave 1 row at top for score display
+		gameW = termW / cellW
+		gameH = (termH - 1) / cellH
+		if gameW < 10 {
+			gameW = 10
 		}
-	}
-	if gameSize > 50 {
-		gameSize = 50
-	}
-	if gameSize < 10 {
-		gameSize = 10
+		if gameH < 10 {
+			gameH = 10
+		}
+		offsetX = 0
+		offsetY = 1 // Leave room for score at top
+	} else {
+		// Interactive mode: centered square game area
+		gameSize := requestedSize
+		if gameSize <= 0 {
+			// Auto-size based on terminal, accounting for cell size
+			maxW := (termW * 8 / 10) / cellW
+			maxH := (termH * 8 / 10) / cellH
+			gameSize = maxW
+			if maxH < gameSize {
+				gameSize = maxH
+			}
+		}
+		if gameSize > 50 {
+			gameSize = 50
+		}
+		if gameSize < 10 {
+			gameSize = 10
+		}
+
+		gameW = gameSize
+		gameH = gameSize
+
+		// Calculate offset to center the game area in terminal
+		pixelW := gameW * cellW
+		pixelH := gameH * cellH
+		offsetX = (termW - pixelW) / 2
+		offsetY = (termH - pixelH) / 2
 	}
 
-	// Game grid dimensions (in game cells, including border)
-	gameW := gameSize
-	gameH := gameSize
-
-	// Calculate pixel dimensions for centering
+	// Calculate pixel dimensions (used for score positioning and resize)
 	pixelW := gameW * cellW
 	pixelH := gameH * cellH
-
-	// Calculate offset to center the game area in terminal
-	offsetX := (termW - pixelW) / 2
-	offsetY := (termH - pixelH) / 2
 
 	// Helper function to draw a game cell as a block
 	drawCell := func(gx, gy int, ch rune, style tcell.Style) {
@@ -146,9 +166,25 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool, gra
 				}
 			case *tcell.EventResize:
 				termW, termH = screen.Size()
-				// Recalculate offset to keep game centered
-				offsetX = (termW - pixelW) / 2
-				offsetY = (termH - pixelH) / 2
+				if !interactive {
+					// Non-interactive: resize game to fill terminal
+					gameW = termW / cellW
+					gameH = (termH - 1) / cellH
+					if gameW < 10 {
+						gameW = 10
+					}
+					if gameH < 10 {
+						gameH = 10
+					}
+					pixelW = gameW * cellW
+					pixelH = gameH * cellH
+					offsetX = 0
+					offsetY = 1
+				} else {
+					// Interactive: recalculate offset to keep game centered
+					offsetX = (termW - pixelW) / 2
+					offsetY = (termH - pixelH) / 2
+				}
 				screen.Sync()
 			}
 		case <-ticker.C:
@@ -194,8 +230,27 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool, gra
 				} else {
 					// Countdown finished - restart the game
 					termW, termH = screen.Size()
-					offsetX = (termW - pixelW) / 2
-					offsetY = (termH - pixelH) / 2
+					if !interactive {
+						// Non-interactive: resize game to fill terminal
+						gameW = termW / cellW
+						gameH = (termH - 1) / cellH
+						if gameW < 10 {
+							gameW = 10
+						}
+						if gameH < 10 {
+							gameH = 10
+						}
+						pixelW = gameW * cellW
+						pixelH = gameH * cellH
+						offsetX = 0
+						offsetY = 1
+					} else {
+						offsetX = (termW - pixelW) / 2
+						offsetY = (termH - pixelH) / 2
+					}
+					// Recalculate center based on current game size
+					centerX = gameW / 2
+					centerY = gameH / 2
 					snake = Snake{
 						body: []Point{
 							{centerX, centerY},
