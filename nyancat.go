@@ -16,7 +16,7 @@ var rainbow = []tcell.Color{
 	tcell.ColorPurple,
 }
 
-func runNyancat(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
+func runNyancat(screen tcell.Screen, sigChan chan os.Signal, interactive bool, grayscale bool) {
 	w, h := screen.Size()
 
 	// Nyancat sprite (simplified ASCII art)
@@ -53,6 +53,10 @@ func runNyancat(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
 				screen.Sync()
 			case *tcell.EventKey:
 				if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
+					return
+				}
+				// In non-interactive mode, any key exits
+				if !interactive {
 					return
 				}
 			}

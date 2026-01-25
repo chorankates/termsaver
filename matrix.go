@@ -14,7 +14,7 @@ type MatrixColumn struct {
 	speed    int
 }
 
-func runMatrixRain(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
+func runMatrixRain(screen tcell.Screen, sigChan chan os.Signal, interactive bool, grayscale bool) {
 	w, h := screen.Size()
 	columns := make([]MatrixColumn, w)
 
@@ -66,6 +66,10 @@ func runMatrixRain(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) 
 				screen.Sync()
 			case *tcell.EventKey:
 				if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
+					return
+				}
+				// In non-interactive mode, any key exits
+				if !interactive {
 					return
 				}
 			}

@@ -16,7 +16,7 @@ type Snowflake struct {
 	active bool
 }
 
-func runSnowflakes(screen tcell.Screen, sigChan chan os.Signal, grayscale bool, windChangeTime float64, windStrength float64) {
+func runSnowflakes(screen tcell.Screen, sigChan chan os.Signal, interactive bool, grayscale bool, windChangeTime float64, windStrength float64) {
 	w, h := screen.Size()
 
 	// Track ground level for each column (Y coordinate where next snowflake lands)
@@ -94,6 +94,10 @@ func runSnowflakes(screen tcell.Screen, sigChan chan os.Signal, grayscale bool, 
 				screen.Sync()
 			case *tcell.EventKey:
 				if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
+					return
+				}
+				// In non-interactive mode, any key exits
+				if !interactive {
 					return
 				}
 			}

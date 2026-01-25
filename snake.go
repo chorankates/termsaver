@@ -59,6 +59,10 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool, gra
 				if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
 					return
 				}
+				// In non-interactive mode, any key exits
+				if !interactive {
+					return
+				}
 				// Handle movement keys only in interactive mode
 				if interactive {
 					switch ev.Key() {

@@ -16,7 +16,7 @@ type SpectrographBar struct {
 	color         tcell.Color
 }
 
-func runSpectrograph(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
+func runSpectrograph(screen tcell.Screen, sigChan chan os.Signal, interactive bool, grayscale bool) {
 	w, h := screen.Size()
 
 	// Define a palette of vibrant colors for the bars
@@ -116,6 +116,10 @@ func runSpectrograph(screen tcell.Screen, sigChan chan os.Signal, grayscale bool
 				screen.Sync()
 			case *tcell.EventKey:
 				if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
+					return
+				}
+				// In non-interactive mode, any key exits
+				if !interactive {
 					return
 				}
 			}

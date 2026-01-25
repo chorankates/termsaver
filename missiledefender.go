@@ -43,7 +43,7 @@ type MissileDefender struct {
 	missilesDestroyed int
 }
 
-func runMissileDefender(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
+func runMissileDefender(screen tcell.Screen, sigChan chan os.Signal, interactive bool, grayscale bool) {
 	w, h := screen.Size()
 	rand.Seed(time.Now().UnixNano())
 
@@ -80,6 +80,10 @@ func runMissileDefender(screen tcell.Screen, sigChan chan os.Signal, grayscale b
 			switch ev := event.(type) {
 			case *tcell.EventKey:
 				if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
+					return
+				}
+				// In non-interactive mode, any key exits
+				if !interactive {
 					return
 				}
 			case *tcell.EventResize:

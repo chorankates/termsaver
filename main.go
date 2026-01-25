@@ -47,21 +47,21 @@ func main() {
 	// Start the selected visualization
 	switch selectedMode {
 	case "matrix":
-		runMatrixRain(screen, sigChan, *grayscale)
+		runMatrixRain(screen, sigChan, *interactive, *grayscale)
 	case "nyancat":
-		runNyancat(screen, sigChan, *grayscale)
+		runNyancat(screen, sigChan, *interactive, *grayscale)
 	case "snake":
 		runSnake(screen, sigChan, *interactive, *grayscale)
 	case "missiledefender":
-		runMissileDefender(screen, sigChan, *grayscale)
+		runMissileDefender(screen, sigChan, *interactive, *grayscale)
 	case "spectrograph":
-		runSpectrograph(screen, sigChan, *grayscale)
+		runSpectrograph(screen, sigChan, *interactive, *grayscale)
 	case "snowflakes":
-		runSnowflakes(screen, sigChan, *grayscale, *windChangeTime, *windStrength)
+		runSnowflakes(screen, sigChan, *interactive, *grayscale, *windChangeTime, *windStrength)
 	case "waterripple":
-		runWaterRipple(screen, sigChan, *grayscale)
+		runWaterRipple(screen, sigChan, *interactive, *grayscale)
 	case "lightning":
-		runLightning(screen, sigChan, *grayscale)
+		runLightning(screen, sigChan, *interactive, *grayscale)
 	default:
 		screen.Fini()
 		fmt.Fprintf(os.Stderr, "Unknown mode: %s. Use: matrix, nyancat, snake, missiledefender, spectrograph, snowflakes, waterripple, lightning, or random\n", *mode)

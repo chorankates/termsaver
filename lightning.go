@@ -44,7 +44,7 @@ type LightningBranch struct {
 	segmentOrder int     // Order in the main path (0 = first, increases down)
 }
 
-func runLightning(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
+func runLightning(screen tcell.Screen, sigChan chan os.Signal, interactive bool, grayscale bool) {
 	w, h := screen.Size()
 
 	clouds := make([]Cloud, 0)
@@ -90,6 +90,10 @@ func runLightning(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
 				screen.Sync()
 			case *tcell.EventKey:
 				if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
+					return
+				}
+				// In non-interactive mode, any key exits
+				if !interactive {
 					return
 				}
 			}
