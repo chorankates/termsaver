@@ -17,7 +17,7 @@ type Ripple struct {
 	active bool
 }
 
-func runWaterRipple(screen tcell.Screen, sigChan chan os.Signal, interactive bool, grayscale bool) {
+func runWaterRipple(screen tcell.Screen, sigChan chan os.Signal, interactive bool, grayscale bool) bool {
 	w, h := screen.Size()
 
 	ripples := make([]Ripple, 0)
@@ -41,7 +41,7 @@ func runWaterRipple(screen tcell.Screen, sigChan chan os.Signal, interactive boo
 	for {
 		select {
 		case <-sigChan:
-			return
+			return false
 		case event := <-eventChan:
 			switch ev := event.(type) {
 			case *tcell.EventResize:
@@ -49,11 +49,15 @@ func runWaterRipple(screen tcell.Screen, sigChan chan os.Signal, interactive boo
 				screen.Sync()
 			case *tcell.EventKey:
 				if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
-					return
+					return false
+				}
+				// Space cycles to next mode
+				if ev.Rune() == ' ' {
+					return true
 				}
 				// In non-interactive mode, any key exits
 				if !interactive {
-					return
+					return false
 				}
 			}
 		case <-ticker.C:

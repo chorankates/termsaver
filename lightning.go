@@ -44,7 +44,7 @@ type LightningBranch struct {
 	segmentOrder int     // Order in the main path (0 = first, increases down)
 }
 
-func runLightning(screen tcell.Screen, sigChan chan os.Signal, interactive bool, grayscale bool) {
+func runLightning(screen tcell.Screen, sigChan chan os.Signal, interactive bool, grayscale bool) bool {
 	w, h := screen.Size()
 
 	clouds := make([]Cloud, 0)
@@ -74,7 +74,7 @@ func runLightning(screen tcell.Screen, sigChan chan os.Signal, interactive bool,
 	for {
 		select {
 		case <-sigChan:
-			return
+			return false
 		case event := <-eventChan:
 			switch ev := event.(type) {
 			case *tcell.EventResize:
@@ -90,11 +90,15 @@ func runLightning(screen tcell.Screen, sigChan chan os.Signal, interactive bool,
 				screen.Sync()
 			case *tcell.EventKey:
 				if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
-					return
+					return false
+				}
+				// Space cycles to next mode
+				if ev.Rune() == ' ' {
+					return true
 				}
 				// In non-interactive mode, any key exits
 				if !interactive {
-					return
+					return false
 				}
 			}
 		case <-ticker.C:

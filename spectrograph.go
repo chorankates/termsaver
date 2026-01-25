@@ -16,7 +16,7 @@ type SpectrographBar struct {
 	color         tcell.Color
 }
 
-func runSpectrograph(screen tcell.Screen, sigChan chan os.Signal, interactive bool, grayscale bool) {
+func runSpectrograph(screen tcell.Screen, sigChan chan os.Signal, interactive bool, grayscale bool) bool {
 	w, h := screen.Size()
 
 	// Define a palette of vibrant colors for the bars
@@ -80,7 +80,7 @@ func runSpectrograph(screen tcell.Screen, sigChan chan os.Signal, interactive bo
 	for {
 		select {
 		case <-sigChan:
-			return
+			return false
 		case event := <-eventChan:
 			switch ev := event.(type) {
 			case *tcell.EventResize:
@@ -116,11 +116,15 @@ func runSpectrograph(screen tcell.Screen, sigChan chan os.Signal, interactive bo
 				screen.Sync()
 			case *tcell.EventKey:
 				if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
-					return
+					return false
+				}
+				// Space cycles to next mode
+				if ev.Rune() == ' ' {
+					return true
 				}
 				// In non-interactive mode, any key exits
 				if !interactive {
-					return
+					return false
 				}
 			}
 		case <-ticker.C:

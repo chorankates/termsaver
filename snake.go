@@ -19,7 +19,7 @@ type Snake struct {
 	alive     bool
 }
 
-func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool, grayscale bool, requestedSize int, scale int) {
+func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool, grayscale bool, requestedSize int, scale int) bool {
 	termW, termH := screen.Size()
 
 	// Clamp scale to reasonable values
@@ -131,17 +131,21 @@ func runSnake(screen tcell.Screen, sigChan chan os.Signal, interactive bool, gra
 	for {
 		select {
 		case <-sigChan:
-			return
+			return false
 		case event := <-eventChan:
 			switch ev := event.(type) {
 			case *tcell.EventKey:
 				// Always handle exit keys, regardless of interactive mode
 				if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
-					return
+					return false
 				}
-				// In non-interactive mode, any key exits
+				// Space cycles to next mode (but not during interactive play)
+				if ev.Rune() == ' ' && !interactive {
+					return true
+				}
+				// In non-interactive mode, any other key exits
 				if !interactive {
-					return
+					return false
 				}
 				// Handle movement keys only in interactive mode
 				if interactive {

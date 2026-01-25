@@ -16,7 +16,7 @@ type Snowflake struct {
 	active bool
 }
 
-func runSnowflakes(screen tcell.Screen, sigChan chan os.Signal, interactive bool, grayscale bool, windChangeTime float64, windStrength float64) {
+func runSnowflakes(screen tcell.Screen, sigChan chan os.Signal, interactive bool, grayscale bool, windChangeTime float64, windStrength float64) bool {
 	w, h := screen.Size()
 
 	// Track ground level for each column (Y coordinate where next snowflake lands)
@@ -63,7 +63,7 @@ func runSnowflakes(screen tcell.Screen, sigChan chan os.Signal, interactive bool
 	for {
 		select {
 		case <-sigChan:
-			return
+			return false
 		case event := <-eventChan:
 			switch ev := event.(type) {
 			case *tcell.EventResize:
@@ -94,11 +94,15 @@ func runSnowflakes(screen tcell.Screen, sigChan chan os.Signal, interactive bool
 				screen.Sync()
 			case *tcell.EventKey:
 				if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
-					return
+					return false
+				}
+				// Space cycles to next mode
+				if ev.Rune() == ' ' {
+					return true
 				}
 				// In non-interactive mode, any key exits
 				if !interactive {
-					return
+					return false
 				}
 			}
 		case <-ticker.C:

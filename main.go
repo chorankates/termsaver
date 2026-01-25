@@ -38,36 +38,61 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
+	// All available modes for cycling
+	allModes := []string{"matrix", "nyancat", "snake", "missiledefender", "spectrograph", "snowflakes", "waterripple", "lightning"}
+
 	// Handle random mode selection
 	selectedMode := *mode
+	modeIndex := 0
 	if selectedMode == "random" {
-		modes := []string{"matrix", "nyancat", "snake", "missiledefender", "spectrograph", "snowflakes", "waterripple", "lightning"}
 		rand.Seed(time.Now().UnixNano())
-		selectedMode = modes[rand.Intn(len(modes))]
+		modeIndex = rand.Intn(len(allModes))
+		selectedMode = allModes[modeIndex]
+	} else {
+		// Find the index of the selected mode
+		for i, m := range allModes {
+			if m == selectedMode {
+				modeIndex = i
+				break
+			}
+		}
 	}
 
-	// Start the selected visualization
-	switch selectedMode {
-	case "matrix":
-		runMatrixRain(screen, sigChan, *interactive, *grayscale)
-	case "nyancat":
-		runNyancat(screen, sigChan, *interactive, *grayscale)
-	case "snake":
-		runSnake(screen, sigChan, *interactive, *grayscale, *snakeSize, *snakeScale)
-	case "missiledefender":
-		runMissileDefender(screen, sigChan, *interactive, *grayscale)
-	case "spectrograph":
-		runSpectrograph(screen, sigChan, *interactive, *grayscale)
-	case "snowflakes":
-		runSnowflakes(screen, sigChan, *interactive, *grayscale, *windChangeTime, *windStrength)
-	case "waterripple":
-		runWaterRipple(screen, sigChan, *interactive, *grayscale)
-	case "lightning":
-		runLightning(screen, sigChan, *interactive, *grayscale)
-	default:
-		screen.Fini()
-		fmt.Fprintf(os.Stderr, "Unknown mode: %s. Use: matrix, nyancat, snake, missiledefender, spectrograph, snowflakes, waterripple, lightning, or random\n", *mode)
-		os.Exit(1)
+	// Start the selected visualization, cycling on space press
+	for {
+		var cycleToNext bool
+
+		switch selectedMode {
+		case "matrix":
+			cycleToNext = runMatrixRain(screen, sigChan, *interactive, *grayscale)
+		case "nyancat":
+			cycleToNext = runNyancat(screen, sigChan, *interactive, *grayscale)
+		case "snake":
+			cycleToNext = runSnake(screen, sigChan, *interactive, *grayscale, *snakeSize, *snakeScale)
+		case "missiledefender":
+			cycleToNext = runMissileDefender(screen, sigChan, *interactive, *grayscale)
+		case "spectrograph":
+			cycleToNext = runSpectrograph(screen, sigChan, *interactive, *grayscale)
+		case "snowflakes":
+			cycleToNext = runSnowflakes(screen, sigChan, *interactive, *grayscale, *windChangeTime, *windStrength)
+		case "waterripple":
+			cycleToNext = runWaterRipple(screen, sigChan, *interactive, *grayscale)
+		case "lightning":
+			cycleToNext = runLightning(screen, sigChan, *interactive, *grayscale)
+		default:
+			screen.Fini()
+			fmt.Fprintf(os.Stderr, "Unknown mode: %s. Use: matrix, nyancat, snake, missiledefender, spectrograph, snowflakes, waterripple, lightning, or random\n", *mode)
+			os.Exit(1)
+		}
+
+		if !cycleToNext {
+			break
+		}
+
+		// Cycle to next mode
+		modeIndex = (modeIndex + 1) % len(allModes)
+		selectedMode = allModes[modeIndex]
+		screen.Clear()
 	}
 }
 
