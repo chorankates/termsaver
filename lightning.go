@@ -34,11 +34,14 @@ type Lightning struct {
 }
 
 type LightningBranch struct {
-	startX float64
-	startY float64
-	endX   float64
-	endY   float64
-	age    float64
+	startX       float64
+	startY       float64
+	endX         float64
+	endY         float64
+	age          float64
+	progress     float64 // 0.0 to 1.0, how much of this branch has been drawn
+	parentIdx    int     // Index of parent branch (-1 for main branch segments)
+	segmentOrder int     // Order in the main path (0 = first, increases down)
 }
 
 func runLightning(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
@@ -94,10 +97,10 @@ func runLightning(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
 			// Spawn new clouds
 			if len(clouds) < maxClouds && time.Since(lastCloudSpawn) >= cloudSpawnInterval {
 				// Spawn clouds at random heights in the upper portion of screen
-				cloudY := float64(rand.Intn(h/4)) // Top quarter of screen
-				cloudWidth := 30 + rand.Intn(40)   // 30-70 characters wide (much wider)
-				cloudHeight := 4 + rand.Intn(4)    // 4-8 layers
-				speed := 0.2 + rand.Float64()*0.3  // 0.2-0.5 speed (slower for bigger clouds)
+				cloudY := float64(rand.Intn(h / 4)) // Top quarter of screen
+				cloudWidth := 30 + rand.Intn(40)    // 30-70 characters wide (much wider)
+				cloudHeight := 4 + rand.Intn(4)     // 4-8 layers
+				speed := 0.2 + rand.Float64()*0.3   // 0.2-0.5 speed (slower for bigger clouds)
 
 				// Create stacked layers that increase in width (normal cloud orientation)
 				layers := make([]CloudLayer, cloudHeight)
@@ -168,14 +171,14 @@ func runLightning(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
 				// Pick a random cloud
 				cloudIdx := rand.Intn(len(clouds))
 				cloud := clouds[cloudIdx]
-				
+
 				// Lightning emerges from bottom of cloud, random x within cloud width
 				lightningX := cloud.x + float64(rand.Intn(cloud.width))
 				lightningY := cloud.y + float64(cloud.height) // Bottom of cloud
-				
+
 				// Create lightning with more branches (fractal)
 				branches := generateFractalLightning(lightningX, lightningY, w, h, 0)
-				
+
 				lightnings = append(lightnings, Lightning{
 					x:        lightningX,
 					y:        lightningY,
@@ -192,6 +195,40 @@ func runLightning(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
 			for i := range lightnings {
 				if lightnings[i].active {
 					lightnings[i].age += 1.0
+
+					// Update branch progress - lightning travels down at ~15 units per frame
+					lightningSpeed := 15.0
+					for j := range lightnings[i].branches {
+						branch := &lightnings[i].branches[j]
+
+						// Calculate branch length
+						dx := branch.endX - branch.startX
+						dy := branch.endY - branch.startY
+						branchLength := math.Sqrt(dx*dx + dy*dy)
+
+						if branchLength > 0 {
+							// Check if parent branch has reached this branch's start point
+							canProgress := true
+							if branch.parentIdx >= 0 && branch.parentIdx < len(lightnings[i].branches) {
+								parent := lightnings[i].branches[branch.parentIdx]
+								// Side branch can only start when parent has reached at least 0.8 progress
+								// (allowing some overlap)
+								if parent.progress < 0.8 {
+									canProgress = false
+								}
+							}
+
+							if canProgress && branch.progress < 1.0 {
+								// Increment progress based on speed
+								progressIncrement := lightningSpeed / branchLength
+								branch.progress += progressIncrement
+								if branch.progress > 1.0 {
+									branch.progress = 1.0
+								}
+							}
+						}
+					}
+
 					// Lightning flashes briefly (2-4 frames)
 					if lightnings[i].age > 2.0+rand.Float64()*2.0 {
 						lightnings[i].active = false
@@ -225,23 +262,23 @@ func runLightning(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
 			litCloudStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorWhite, grayscale)).Background(tcell.ColorBlack)
 			litCloudMediumStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorLightYellow, grayscale)).Background(tcell.ColorBlack)
 			cloudChars := []rune{'█', '▓', '▒'}
-			
+
 			for cloudIdx, cloud := range clouds {
 				if !cloud.active {
 					continue
 				}
-				
+
 				cloudStartX := int(cloud.x)
 				cloudStartY := int(cloud.y)
 				isLit := activeLightningClouds[cloudIdx]
-				
+
 				// Draw cloud as stacked rectangles
 				for layerIdx, layer := range cloud.layers {
 					y := cloudStartY + layerIdx
 					if y < 0 || y >= h {
 						continue
 					}
-					
+
 					// Draw this layer
 					layerStartX := cloudStartX + layer.offset
 					for dx := 0; dx < layer.width; dx++ {
@@ -250,7 +287,7 @@ func runLightning(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
 							// Add some texture variation
 							var char rune
 							var style tcell.Style
-							
+
 							randVal := rand.Float64()
 							if randVal < 0.6 {
 								char = cloudChars[0] // █ (solid)
@@ -274,7 +311,7 @@ func runLightning(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
 									style = darkCloudStyle
 								}
 							}
-							
+
 							// Edges are more wispy
 							if dx < 2 || dx >= layer.width-2 {
 								if rand.Float64() < 0.5 {
@@ -286,7 +323,7 @@ func runLightning(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
 									}
 								}
 							}
-							
+
 							screen.SetContent(x, y, char, nil, style)
 						}
 					}
@@ -298,20 +335,24 @@ func runLightning(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
 			brightLightningStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorWhite, grayscale)).Background(tcell.ColorBlack)
 			glowStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorDarkCyan, grayscale)).Background(tcell.ColorBlack)
 			glowMediumStyle := tcell.StyleDefault.Foreground(toGrayscale(tcell.ColorBlue, grayscale)).Background(tcell.ColorBlack)
-			
+
 			for _, lightning := range lightnings {
 				if !lightning.active {
 					continue
 				}
-				
-				// First pass: Draw glow around lightning
+
+				// First pass: Draw glow around lightning (only drawn portions)
 				for _, branch := range lightning.branches {
-					drawLightningGlow(screen, branch, glowStyle, glowMediumStyle, w, h, grayscale)
+					if branch.progress > 0 {
+						drawLightningGlow(screen, branch, glowStyle, glowMediumStyle, w, h, grayscale)
+					}
 				}
-				
-				// Second pass: Draw the lightning itself
+
+				// Second pass: Draw the lightning itself (only drawn portions)
 				for _, branch := range lightning.branches {
-					drawLightningBranch(screen, branch, lightningStyle, brightLightningStyle, w, h)
+					if branch.progress > 0 {
+						drawLightningBranch(screen, branch, lightningStyle, brightLightningStyle, w, h)
+					}
 				}
 			}
 
@@ -322,48 +363,48 @@ func runLightning(screen tcell.Screen, sigChan chan os.Signal, grayscale bool) {
 
 func generateFractalLightning(startX, startY float64, w, h int, depth int) []LightningBranch {
 	branches := make([]LightningBranch, 0)
-	
+
 	// Maximum recursion depth
 	if depth > 3 {
 		return branches
 	}
-	
+
 	// Main branch goes down
 	currentX := startX
 	currentY := startY
 	targetY := float64(h - 1)
-	
+
 	// Don't go past bottom
 	if currentY >= targetY {
 		return branches
 	}
-	
+
 	// Create jagged path down
 	segments := 6 + rand.Intn(6) // 6-12 segments
 	remainingDist := targetY - startY
 	if remainingDist <= 0 {
 		return branches
 	}
-	
+
 	segmentLength := remainingDist / float64(segments)
 	if segmentLength < 1 {
 		segmentLength = 1
 	}
-	
+
 	prevX := currentX
 	prevY := currentY
-	
+
 	for i := 0; i < segments; i++ {
 		// Add horizontal jitter
 		jitter := (rand.Float64() - 0.5) * 4.0 // ±2 characters
 		currentX += jitter
 		currentY += segmentLength
-		
+
 		// Don't go past bottom
 		if currentY > targetY {
 			currentY = targetY
 		}
-		
+
 		// Clamp to screen bounds
 		if currentX < 1 {
 			currentX = 1
@@ -371,75 +412,104 @@ func generateFractalLightning(startX, startY float64, w, h int, depth int) []Lig
 		if currentX >= float64(w-1) {
 			currentX = float64(w - 2)
 		}
-		
+
+		// Main branch segment - parent is previous segment (or -1 for first)
+		parentIdx := -1
+		if i > 0 {
+			parentIdx = len(branches) - 1
+		}
+
 		branches = append(branches, LightningBranch{
-			startX: prevX,
-			startY: prevY,
-			endX:   currentX,
-			endY:   currentY,
-			age:    0.0,
+			startX:       prevX,
+			startY:       prevY,
+			endX:         currentX,
+			endY:         currentY,
+			age:          0.0,
+			progress:     0.0,
+			parentIdx:    parentIdx,
+			segmentOrder: i,
 		})
-		
+
 		// Create side branches more frequently (fractal branching)
 		if rand.Float64() < 0.6 && i < segments-1 && currentY < targetY-5 {
 			// Determine branch direction and length
 			branchAngle := (rand.Float64() - 0.5) * 1.5 // -0.75 to 0.75
-			branchLength := 5.0 + rand.Float64()*10.0    // 5-15 units
-			
+			branchLength := 5.0 + rand.Float64()*10.0   // 5-15 units
+
 			branchEndX := currentX + branchAngle*branchLength
 			branchEndY := currentY + branchLength*0.7 // Go mostly down
-			
+
 			if branchEndX >= 1 && branchEndX < float64(w-1) && branchEndY < float64(h) {
-				// Add main branch segment
+				// Side branch - parent is the current main branch segment
+				sideBranchParentIdx := len(branches) - 1
+
+				// Add side branch segment
 				branches = append(branches, LightningBranch{
-					startX: currentX,
-					startY: currentY,
-					endX:   branchEndX,
-					endY:   branchEndY,
-					age:    0.0,
+					startX:       currentX,
+					startY:       currentY,
+					endX:         branchEndX,
+					endY:         branchEndY,
+					age:          0.0,
+					progress:     0.0,
+					parentIdx:    sideBranchParentIdx,
+					segmentOrder: i, // Same order as parent segment
 				})
-				
+
 				// Recursively create sub-branches (fractal)
 				if depth < 2 && rand.Float64() < 0.5 {
+					sideBranchIdx := len(branches) - 1
 					subBranches := generateFractalLightning(branchEndX, branchEndY, w, h, depth+1)
+					// Update parent indices for sub-branches - first branch should point to side branch
+					for k := range subBranches {
+						if subBranches[k].parentIdx == -1 {
+							// First branch in recursive call should point to the side branch
+							subBranches[k].parentIdx = sideBranchIdx
+						} else {
+							// Other branches need their parent indices adjusted
+							subBranches[k].parentIdx += len(branches)
+						}
+					}
 					branches = append(branches, subBranches...)
 				}
 			}
 		}
-		
+
 		prevX = currentX
 		prevY = currentY
-		
+
 		// Stop if we reached the bottom
 		if currentY >= targetY {
 			break
 		}
 	}
-	
+
 	return branches
 }
 
 func drawLightningGlow(screen tcell.Screen, branch LightningBranch, glowStyle, glowMediumStyle tcell.Style, w, h int, grayscale bool) {
-	// Draw soft glow around the lightning path
+	// Draw soft glow around the lightning path (only drawn portion)
 	dx := branch.endX - branch.startX
 	dy := branch.endY - branch.startY
 	length := math.Sqrt(dx*dx + dy*dy)
-	
+
 	if length == 0 {
 		return
 	}
-	
+
 	steps := int(length) + 1
 	if steps < 1 {
 		steps = 1
 	}
-	
+
+	// Only draw glow up to the current progress
+	maxStep := int(float64(steps) * branch.progress)
+
 	// Draw glow around each point in the lightning path
-	for i := 0; i <= steps; i++ {
+	for i := 0; i <= maxStep; i++ {
 		t := float64(i) / float64(steps)
 		centerX := branch.startX + dx*t
 		centerY := branch.startY + dy*t
-		
+
 		// Draw glow in a small radius around this point
 		glowRadius := 2
 		for gy := -glowRadius; gy <= glowRadius; gy++ {
@@ -448,17 +518,17 @@ func drawLightningGlow(screen tcell.Screen, branch LightningBranch, glowStyle, g
 				if distance > float64(glowRadius) {
 					continue
 				}
-				
+
 				x := int(centerX) + gx
 				y := int(centerY) + gy
-				
+
 				if x >= 0 && x < w && y >= 0 && y < h {
 					// Don't overwrite if there's already content (like the lightning itself)
 					currentRune, _, _, _ := screen.GetContent(x, y)
 					if currentRune != ' ' && currentRune != 0 {
 						continue
 					}
-					
+
 					// Choose glow intensity based on distance
 					var glowChar rune
 					var style tcell.Style
@@ -472,7 +542,7 @@ func drawLightningGlow(screen tcell.Screen, branch LightningBranch, glowStyle, g
 						glowChar = ' '
 						style = glowStyle
 					}
-					
+
 					// Randomly skip some glow for organic effect
 					if rand.Float64() < 0.6 {
 						screen.SetContent(x, y, glowChar, nil, style)
@@ -484,30 +554,33 @@ func drawLightningGlow(screen tcell.Screen, branch LightningBranch, glowStyle, g
 }
 
 func drawLightningBranch(screen tcell.Screen, branch LightningBranch, style, brightStyle tcell.Style, w, h int) {
-	// Draw line from start to end
+	// Draw line from start to end (only drawn portion)
 	dx := branch.endX - branch.startX
 	dy := branch.endY - branch.startY
 	length := math.Sqrt(dx*dx + dy*dy)
-	
+
 	if length == 0 {
 		return
 	}
-	
+
 	steps := int(length) + 1
 	if steps < 1 {
 		steps = 1
 	}
-	
+
+	// Only draw up to the current progress
+	maxStep := int(float64(steps) * branch.progress)
+
 	lightningChars := []rune{'|', '/', '\\', '╲', '╱'}
-	
-	for i := 0; i <= steps; i++ {
+
+	for i := 0; i <= maxStep; i++ {
 		t := float64(i) / float64(steps)
 		x := branch.startX + dx*t
 		y := branch.startY + dy*t
-		
+
 		xInt := int(x)
 		yInt := int(y)
-		
+
 		if xInt >= 0 && xInt < w && yInt >= 0 && yInt < h {
 			// Choose character based on direction
 			var char rune
@@ -522,7 +595,7 @@ func drawLightningBranch(screen tcell.Screen, branch LightningBranch, style, bri
 			} else {
 				char = lightningChars[4] // ╱
 			}
-			
+
 			// Alternate between bright and normal for flicker effect
 			if rand.Float64() < 0.3 {
 				screen.SetContent(xInt, yInt, char, nil, brightStyle)
