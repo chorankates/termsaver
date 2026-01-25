@@ -1,5 +1,8 @@
 .PHONY: build clean all
 
+run: build
+	./bin/termsaver
+
 # Build all platforms
 all: darwin-arm64 linux-arm linux-arm64 linux-amd64
 
@@ -26,5 +29,4 @@ build:
 # Clean build artifacts
 clean:
 	rm -rf bin/
-
 
