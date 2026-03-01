@@ -15,27 +15,27 @@ import (
 )
 
 const (
-	hmClockTick  = 100             // Linux CLK_TCK (jiffies/sec)
-	hmPollRate   = 1 * time.Second // process stat sample interval
-	hmLerpFactor = 0.10            // heat animation smoothing
-	hmMaxProcs   = 48              // max processes in the treemap
+	hmClockTick  = 100
+	hmPollRate   = 1 * time.Second
+	hmLerpFactor = 0.08
+	hmMaxProcs   = 48
+	// Terminal cells are visually ~2× taller than wide; correct for aspect ratio
+	hmCharAspect = 2.1
 )
-
-// ── Data types ────────────────────────────────────────────────────────────────
 
 type hmProcSnap struct {
 	pid      int
 	name     string
 	cpuTicks uint64
 	memKB    int64
+	ioBytes  uint64
 }
 
 type hmEntry struct {
-	name      string
-	memKB     int64
-	cpuRaw    float64 // ticks/sec (for label text)
-	cpuHeat   float64 // current animated value [0,1]
-	cpuTarget float64 // target [0,1]
+	name       string
+	memKB      int64
+	heat       float64 // animated [0,1]: driven by CPU or disk IO, whichever is hotter
+	heatTarget float64
 }
 
 type tmRect struct {
@@ -43,7 +43,7 @@ type tmRect struct {
 	e          *hmEntry
 }
 
-// ── Process sampling ──────────────────────────────────────────────────────────
+// ── Sampling ──────────────────────────────────────────────────────────────────
 
 func hmReadSnap(pid int) (hmProcSnap, bool) {
 	nameData, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
@@ -79,7 +79,23 @@ func hmReadSnap(pid int) (hmProcSnap, bool) {
 		}
 		f.Close()
 	}
-	return hmProcSnap{pid, strings.TrimSpace(string(nameData)), utime + stime, memKB}, true
+
+	var ioBytes uint64
+	if f, err := os.Open(fmt.Sprintf("/proc/%d/io", pid)); err == nil {
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			line := sc.Text()
+			if strings.HasPrefix(line, "read_bytes:") || strings.HasPrefix(line, "write_bytes:") {
+				if parts := strings.Fields(line); len(parts) >= 2 {
+					v, _ := strconv.ParseUint(parts[1], 10, 64)
+					ioBytes += v
+				}
+			}
+		}
+		f.Close()
+	}
+
+	return hmProcSnap{pid, strings.TrimSpace(string(nameData)), utime + stime, memKB, ioBytes}, true
 }
 
 func hmSample() map[int]hmProcSnap {
@@ -100,17 +116,13 @@ func hmSample() map[int]hmProcSnap {
 
 // ── Color ─────────────────────────────────────────────────────────────────────
 
-// hmHeatColor maps [0,1] → cool-to-hot gradient: navy → blue → cyan → green → yellow → orange → red
 func hmHeatColor(v float64, grayscale bool) tcell.Color {
 	v = math.Max(0, math.Min(1, v))
 	if grayscale {
 		lum := int32(v * 230)
 		return tcell.NewRGBColor(lum, lum, lum)
 	}
-	type stop struct {
-		pos     float64
-		r, g, b int32
-	}
+	type stop struct{ pos float64; r, g, b int32 }
 	stops := []stop{
 		{0.00, 4, 4, 22},
 		{0.15, 0, 0, 185},
@@ -137,213 +149,169 @@ func hmHeatColor(v float64, grayscale bool) tcell.Color {
 	return tcell.NewRGBColor(255, 80, 80)
 }
 
-func hmFgColor(heat float64, grayscale bool) tcell.Color {
-	if grayscale {
-		if heat > 0.55 {
-			return tcell.NewRGBColor(0, 0, 0)
-		}
-		return tcell.NewRGBColor(255, 255, 255)
+// ── Treemap layout — recursive binary split ───────────────────────────────────
+
+// worstAspect returns the worst visual aspect ratio for a w×h terminal rect.
+func worstAspect(w, h int) float64 {
+	if w == 0 || h == 0 {
+		return math.MaxFloat64
 	}
-	if heat > 0.58 {
-		return tcell.NewRGBColor(10, 10, 10)
-	}
-	return tcell.NewRGBColor(235, 240, 255)
+	pw := float64(w) * hmCharAspect
+	ph := float64(h)
+	return math.Max(pw/ph, ph/pw)
 }
 
-// ── Treemap layout ────────────────────────────────────────────────────────────
+// layoutRecursive splits entries into a region using binary space partitioning.
+// At each level it tries both a vertical and horizontal cut and picks whichever
+// gives the better worst-case aspect ratio, so cells vary in both x and y.
+func layoutRecursive(entries []hmEntry, x, y, w, h int, out *[]tmRect) {
+	if len(entries) == 0 || w <= 0 || h <= 0 {
+		return
+	}
+	if len(entries) == 1 {
+		*out = append(*out, tmRect{x, y, w, h, &entries[0]})
+		return
+	}
 
-// layoutTreemap arranges entries (sorted by memKB desc) into a squarified strip treemap.
-// charAspect corrects for terminal cells being ~2× taller than wide visually.
-func layoutTreemap(entries []hmEntry, W, H int) []tmRect {
-	var totalMem int64
+	var total int64
 	for i := range entries {
-		totalMem += entries[i].memKB
+		total += entries[i].memKB
 	}
-	if totalMem == 0 || W == 0 || H == 0 {
-		return nil
+	if total == 0 {
+		return
 	}
 
-	const charAspect = 2.1 // visual pixel width : pixel height per cell
-
-	var rects []tmRect
-	y, i := 0, 0
-
-	for i < len(entries) && y < H {
-		remainingH := H - y
-
-		// remaining memory for processes not yet placed
-		var remainingMem int64
-		for j := i; j < len(entries); j++ {
-			remainingMem += entries[j].memKB
+	// Find the split index so the left group's area is as close to half as possible
+	half := total / 2
+	var cum int64
+	pivot := 1
+	for i := range entries {
+		cum += entries[i].memKB
+		if cum >= half {
+			pivot = i + 1
+			break
 		}
-
-		// Squarification: find how many items minimize the worst aspect ratio in this strip
-		bestN := 1
-		bestWorst := math.MaxFloat64
-
-		for n := 1; n <= len(entries)-i; n++ {
-			var stripMem int64
-			for j := 0; j < n; j++ {
-				stripMem += entries[i+j].memKB
-			}
-			stripH := float64(remainingH) * float64(stripMem) / float64(remainingMem)
-
-			worst := 0.0
-			for j := 0; j < n; j++ {
-				cellW := float64(W) * float64(entries[i+j].memKB) / float64(stripMem)
-				pixW := cellW * charAspect
-				pixH := stripH
-				var ar float64
-				if pixW > 0 && pixH > 0 {
-					ar = math.Max(pixW/pixH, pixH/pixW)
-				} else {
-					ar = math.MaxFloat64
-				}
-				if ar > worst {
-					worst = ar
-				}
-			}
-			if n == 1 || worst <= bestWorst {
-				bestWorst = worst
-				bestN = n
-			} else {
-				break
-			}
-		}
-
-		var stripMem int64
-		for j := 0; j < bestN; j++ {
-			stripMem += entries[i+j].memKB
-		}
-		stripH := int(math.Round(float64(remainingH) * float64(stripMem) / float64(remainingMem)))
-		if stripH < 1 {
-			stripH = 1
-		}
-		if y+stripH > H {
-			stripH = H - y
-		}
-
-		x := 0
-		for j := 0; j < bestN; j++ {
-			var cellW int
-			if j == bestN-1 {
-				cellW = W - x
-			} else {
-				cellW = int(math.Round(float64(W) * float64(entries[i+j].memKB) / float64(stripMem)))
-				if cellW < 1 {
-					cellW = 1
-				}
-			}
-			if x+cellW > W {
-				cellW = W - x
-			}
-			if cellW > 0 && stripH > 0 {
-				rects = append(rects, tmRect{x, y, cellW, stripH, &entries[i+j]})
-			}
-			x += cellW
-		}
-
-		y += stripH
-		i += bestN
 	}
-	return rects
+	if pivot >= len(entries) {
+		pivot = len(entries) - 1
+	}
+
+	var leftMem int64
+	for i := 0; i < pivot; i++ {
+		leftMem += entries[i].memKB
+	}
+	rightMem := total - leftMem
+
+	// Option A: vertical cut (left | right)
+	leftW := int(math.Round(float64(w) * float64(leftMem) / float64(total)))
+	if leftW < 1 {
+		leftW = 1
+	}
+	if leftW >= w {
+		leftW = w - 1
+	}
+	aspectV := math.Max(worstAspect(leftW, h), worstAspect(w-leftW, h))
+
+	// Option B: horizontal cut (top / bottom)
+	topH := int(math.Round(float64(h) * float64(leftMem) / float64(total)))
+	if topH < 1 {
+		topH = 1
+	}
+	if topH >= h {
+		topH = h - 1
+	}
+	aspectH := math.Max(worstAspect(w, topH), worstAspect(w, h-topH))
+
+	// Tiebreak toward the cut that makes the larger group more square
+	_ = rightMem
+	if aspectV <= aspectH {
+		layoutRecursive(entries[:pivot], x, y, leftW, h, out)
+		layoutRecursive(entries[pivot:], x+leftW, y, w-leftW, h, out)
+	} else {
+		layoutRecursive(entries[:pivot], x, y, w, topH, out)
+		layoutRecursive(entries[pivot:], x, y+topH, w, h-topH, out)
+	}
 }
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
-func hmFmtMem(kb int64) string {
-	switch {
-	case kb >= 1024*1024:
-		return fmt.Sprintf("%.1fGB", float64(kb)/1048576)
-	case kb >= 1024:
-		return fmt.Sprintf("%.0fMB", float64(kb)/1024)
-	default:
-		return fmt.Sprintf("%dKB", kb)
-	}
-}
+func hmRenderRect(screen tcell.Screen, r tmRect, elapsed float64, grayscale bool) {
+	heat := r.e.heat
+	phase := (float64(r.x)*1.618 + float64(r.y)*0.927) * 0.5
 
-func hmRenderRect(screen tcell.Screen, r tmRect, grayscale bool) {
-	bg := hmHeatColor(r.e.cpuHeat, grayscale)
-	fg := hmFgColor(r.e.cpuHeat, grayscale)
-	fill := tcell.StyleDefault.Background(bg).Foreground(fg)
+	pulseMag := heat * heat * 0.10
+	pulseFreq := 0.6 + heat*3.0
+	pulsed := heat + pulseMag*math.Sin(elapsed*pulseFreq*math.Pi*2+phase)
+	pulsed = math.Max(0, math.Min(1, pulsed))
 
-	// Fill background
+	// Fill using ▀ half-blocks so each character row has a top and bottom colour,
+	// creating a smooth vertical gradient with twice the effective resolution.
 	for row := r.y; row < r.y+r.h; row++ {
+		rowFrac := 0.0
+		if r.h > 1 {
+			rowFrac = float64(row-r.y) / float64(r.h-1)
+		}
+		glow := (1.0 - math.Abs(rowFrac-0.3)*1.4) * 0.14 * pulsed
+		topColor := hmHeatColor(math.Min(1, pulsed+glow), grayscale)
+		botColor := hmHeatColor(math.Max(0, pulsed+glow*0.35), grayscale)
+		style := tcell.StyleDefault.Foreground(topColor).Background(botColor)
 		for col := r.x; col < r.x+r.w; col++ {
-			screen.SetContent(col, row, ' ', nil, fill)
+			screen.SetContent(col, row, '▀', nil, style)
 		}
 	}
 
-	// Thin dark border on left and top edges (shared borders save space)
-	borderCol := tcell.NewRGBColor(0, 0, 0)
-	if grayscale {
-		borderCol = tcell.NewRGBColor(8, 8, 8)
-	}
-	border := tcell.StyleDefault.Background(borderCol)
-	if r.x > 0 {
-		for row := r.y; row < r.y+r.h; row++ {
-			screen.SetContent(r.x, row, ' ', nil, border)
-		}
-	}
-	if r.y > 0 {
-		for col := r.x; col < r.x+r.w; col++ {
-			screen.SetContent(col, r.y, ' ', nil, border)
+	// Drifting sparkles on hot cells
+	if heat > 0.70 && r.w >= 3 && r.h >= 2 {
+		sparks := []rune{'·', '∙', '•', '+', '✦'}
+		for s := 0; s < int(heat*4)+1; s++ {
+			sf := float64(s)
+			sx := r.x + 1 + int((math.Sin(elapsed*4.1+sf*1.9+phase)+1)/2*math.Max(1, float64(r.w-2)))
+			sy := r.y + int((math.Cos(elapsed*3.3+sf*2.7+phase)+1)/2*math.Max(1, float64(r.h-1)))
+			if sx >= r.x && sx < r.x+r.w && sy >= r.y && sy < r.y+r.h {
+				bright := 0.5 + 0.5*math.Sin(elapsed*11+sf*3.1+phase)
+				var sparkFg tcell.Color
+				if grayscale {
+					v := int32(180 + bright*75)
+					sparkFg = tcell.NewRGBColor(v, v, v)
+				} else {
+					sparkFg = tcell.NewRGBColor(int32(215+bright*40), int32(170+bright*85), int32(bright*55))
+				}
+				ch := sparks[int(elapsed*7+sf*1.3+phase)%len(sparks)]
+				screen.SetContent(sx, sy, ch, nil,
+					tcell.StyleDefault.Foreground(sparkFg).Background(hmHeatColor(math.Min(1, pulsed+0.05), grayscale)))
+			}
 		}
 	}
 
-	// Interior dimensions (inside the 1-char border where applicable)
-	ix := r.x
-	iy := r.y
-	iw := r.w
-	ih := r.h
-	if r.x > 0 {
-		ix++
-		iw--
-	}
-	if r.y > 0 {
-		iy++
-		ih--
-	}
-	if iw < 1 || ih < 1 {
-		return
-	}
-
-	// Render text labels centered in the interior
-	var lines []string
-	name := r.e.name
-	maxLabelW := iw - 2
-	if maxLabelW < 1 {
-		return
-	}
-	if len([]rune(name)) > maxLabelW {
+	// Name only on cells that have enough room
+	if r.w >= 9 && r.h >= 3 {
+		name := r.e.name
+		if runes := []rune(name); len(runes) > r.w-2 {
+			name = string(runes[:r.w-2])
+		}
 		runes := []rune(name)
-		if maxLabelW > 1 {
-			name = string(runes[:maxLabelW-1]) + "…"
-		} else {
-			name = string(runes[:maxLabelW])
-		}
-	}
-	lines = append(lines, name)
-	if ih >= 2 && iw >= 7 {
-		lines = append(lines, hmFmtMem(r.e.memKB))
-	}
-	if ih >= 3 && iw >= 9 {
-		cpuPct := r.e.cpuRaw / float64(hmClockTick) * 100
-		lines = append(lines, fmt.Sprintf("cpu %.1f%%", cpuPct))
-	}
+		lx := r.x + (r.w-len(runes))/2
+		ly := r.y + r.h/2
 
-	startY := iy + (ih-len(lines))/2
-	for li, line := range lines {
-		ly := startY + li
-		if ly < iy || ly >= iy+ih {
-			continue
+		var fg tcell.Color
+		if grayscale {
+			if heat > 0.55 {
+				fg = tcell.NewRGBColor(20, 20, 20)
+			} else {
+				fg = tcell.NewRGBColor(160, 160, 160)
+			}
+		} else {
+			if heat > 0.58 {
+				fg = tcell.NewRGBColor(20, 15, 5)
+			} else {
+				fg = tcell.NewRGBColor(160, 175, 210)
+			}
 		}
-		runes := []rune(line)
-		startX := ix + (iw-len(runes))/2
-		for ci, ch := range runes {
-			lx := startX + ci
-			if lx >= ix && lx < ix+iw {
-				screen.SetContent(lx, ly, ch, nil, fill)
+		bg := hmHeatColor(pulsed, grayscale)
+		style := tcell.StyleDefault.Foreground(fg).Background(bg)
+		for i, ch := range runes {
+			if lx+i >= r.x && lx+i < r.x+r.w {
+				screen.SetContent(lx+i, ly, ch, nil, style)
 			}
 		}
 	}
@@ -376,6 +344,7 @@ func runHeatmap(screen tcell.Screen, sigChan chan os.Signal, interactive bool, g
 	var entries []hmEntry
 	var lastSample time.Time
 	heatByName := make(map[string]float64)
+	startTime := time.Now()
 
 	for {
 		select {
@@ -393,6 +362,7 @@ func runHeatmap(screen tcell.Screen, sigChan chan os.Signal, interactive bool, g
 				type raw struct {
 					name    string
 					cpuRate float64
+					ioRate  float64
 					memKB   int64
 				}
 				rawList := make([]raw, 0, len(snap))
@@ -401,14 +371,16 @@ func runHeatmap(screen tcell.Screen, sigChan chan os.Signal, interactive bool, g
 					if !ok {
 						continue
 					}
-					var cpuDelta float64
+					var cpuDelta, ioDelta float64
 					if curr.cpuTicks >= p.cpuTicks {
 						cpuDelta = float64(curr.cpuTicks-p.cpuTicks) / elapsed
 					}
-					rawList = append(rawList, raw{curr.name, cpuDelta, curr.memKB})
+					if curr.ioBytes >= p.ioBytes {
+						ioDelta = float64(curr.ioBytes-p.ioBytes) / elapsed
+					}
+					rawList = append(rawList, raw{curr.name, cpuDelta, ioDelta, curr.memKB})
 				}
 
-				// Sort by memory descending, limit count
 				sort.Slice(rawList, func(i, j int) bool {
 					return rawList[i].memKB > rawList[j].memKB
 				})
@@ -416,30 +388,33 @@ func runHeatmap(screen tcell.Screen, sigChan chan os.Signal, interactive bool, g
 					rawList = rawList[:hmMaxProcs]
 				}
 
-				var maxCPU float64
+				var maxCPU, maxIO float64
 				for _, r := range rawList {
 					if r.cpuRate > maxCPU {
 						maxCPU = r.cpuRate
+					}
+					if r.ioRate > maxIO {
+						maxIO = r.ioRate
 					}
 				}
 				if maxCPU < 1 {
 					maxCPU = 1
 				}
+				if maxIO < 1 {
+					maxIO = 1
+				}
 
 				newEntries := make([]hmEntry, len(rawList))
 				for i, r := range rawList {
-					target := r.cpuRate / maxCPU
+					// Logical OR of intensities: high CPU *or* high disk IO heats the cell
+					cpuNorm := r.cpuRate / maxCPU
+					ioNorm := r.ioRate / maxIO
+					target := 1 - (1-cpuNorm)*(1-ioNorm)
 					current, seen := heatByName[r.name]
 					if !seen {
 						current = target * 0.5
 					}
-					newEntries[i] = hmEntry{
-						name:      r.name,
-						memKB:     r.memKB,
-						cpuRaw:    r.cpuRate,
-						cpuHeat:   current,
-						cpuTarget: target,
-					}
+					newEntries[i] = hmEntry{r.name, r.memKB, current, target}
 				}
 				entries = newEntries
 			}
@@ -465,80 +440,27 @@ func runHeatmap(screen tcell.Screen, sigChan chan os.Signal, interactive bool, g
 			}
 
 		case <-drawTick.C:
-			// Animate heat values
+			elapsed := time.Since(startTime).Seconds()
+
 			for i := range entries {
-				entries[i].cpuHeat += (entries[i].cpuTarget - entries[i].cpuHeat) * hmLerpFactor
-				heatByName[entries[i].name] = entries[i].cpuHeat
+				entries[i].heat += (entries[i].heatTarget - entries[i].heat) * hmLerpFactor
+				heatByName[entries[i].name] = entries[i].heat
 			}
-
-			screen.Clear()
-
-			// Treemap fills all but the legend row
-			treemapH := h - 1
 
 			if len(entries) == 0 {
-				bgStyle := tcell.StyleDefault.Background(tcell.NewRGBColor(4, 4, 18))
-				for y := 0; y < treemapH; y++ {
+				breathe := 0.04 + 0.02*math.Sin(elapsed*0.8)
+				bg := hmHeatColor(breathe, grayscale)
+				style := tcell.StyleDefault.Foreground(bg).Background(tcell.NewRGBColor(0, 0, 0))
+				for y := 0; y < h; y++ {
 					for x := 0; x < w; x++ {
-						screen.SetContent(x, y, ' ', nil, bgStyle)
+						screen.SetContent(x, y, '▀', nil, style)
 					}
 				}
-				msgStyle := bgStyle.Foreground(tcell.NewRGBColor(70, 90, 170))
-				msg := "Sampling processes…"
-				mx := (w - len(msg)) / 2
-				if mx < 0 {
-					mx = 0
-				}
-				for i, ch := range msg {
-					screen.SetContent(mx+i, treemapH/2, ch, nil, msgStyle)
-				}
 			} else {
-				rects := layoutTreemap(entries, w, treemapH)
+				rects := make([]tmRect, 0, len(entries))
+				layoutRecursive(entries, 0, 0, w, h, &rects)
 				for _, r := range rects {
-					hmRenderRect(screen, r, grayscale)
-				}
-			}
-
-			// Legend bar (bottom row)
-			legendBg := tcell.NewRGBColor(0, 0, 0)
-			if grayscale {
-				legendBg = tcell.NewRGBColor(6, 6, 6)
-			}
-			legendFg := tcell.NewRGBColor(130, 148, 215)
-			if grayscale {
-				legendFg = tcell.NewRGBColor(155, 155, 155)
-			}
-			legStyle := tcell.StyleDefault.Background(legendBg).Foreground(legendFg)
-			for x := 0; x < w; x++ {
-				screen.SetContent(x, h-1, ' ', nil, legStyle)
-			}
-			lx := 1
-			label := "size=MEM  color=CPU  "
-			for _, ch := range label {
-				if lx < w {
-					screen.SetContent(lx, h-1, ch, nil, legStyle)
-					lx++
-				}
-			}
-			gradW := w / 5
-			if gradW > 40 {
-				gradW = 40
-			}
-			if gradW < 6 {
-				gradW = 6
-			}
-			for i := 0; i < gradW && lx+i < w; i++ {
-				hv := float64(i) / float64(gradW-1)
-				col := hmHeatColor(hv, grayscale)
-				screen.SetContent(lx+i, h-1, '█', nil,
-					tcell.StyleDefault.Foreground(col).Background(legendBg))
-			}
-			lx += gradW + 1
-			suffix := " low→high"
-			for _, ch := range suffix {
-				if lx < w {
-					screen.SetContent(lx, h-1, ch, nil, legStyle)
-					lx++
+					hmRenderRect(screen, r, elapsed, grayscale)
 				}
 			}
 
