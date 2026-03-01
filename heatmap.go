@@ -15,71 +15,60 @@ import (
 )
 
 const (
-	hmClockTick  = 100             // Linux CLK_TCK (jiffies per second)
-	hmPollRate   = 1 * time.Second // How often to sample process stats
-	hmLerpFactor = 0.12            // Heat animation smoothing (lower = smoother)
+	hmClockTick  = 100             // Linux CLK_TCK (jiffies/sec)
+	hmPollRate   = 1 * time.Second // process stat sample interval
+	hmLerpFactor = 0.10            // heat animation smoothing
+	hmMaxProcs   = 48              // max processes in the treemap
 )
 
-type hmProc struct {
+// ── Data types ────────────────────────────────────────────────────────────────
+
+type hmProcSnap struct {
 	pid      int
 	name     string
 	cpuTicks uint64
 	memKB    int64
-	ioBytes  uint64
 }
 
-type hmRow struct {
+type hmEntry struct {
 	name      string
-	cpuRaw    float64 // delta ticks/sec
 	memKB     int64
-	diskBps   float64 // delta bytes/sec
+	cpuRaw    float64 // ticks/sec (for label text)
 	cpuHeat   float64 // current animated value [0,1]
-	memHeat   float64
-	diskHeat  float64
-	cpuTarget float64 // target value [0,1]
-	memTarget float64
-	diskTarget float64
+	cpuTarget float64 // target [0,1]
 }
 
-func hmGetPIDs() []int {
-	matches, _ := filepath.Glob("/proc/[0-9]*/comm")
-	pids := make([]int, 0, len(matches))
-	for _, m := range matches {
-		parts := strings.Split(m, "/")
-		if len(parts) >= 3 {
-			if pid, err := strconv.Atoi(parts[2]); err == nil {
-				pids = append(pids, pid)
-			}
-		}
-	}
-	return pids
+type tmRect struct {
+	x, y, w, h int
+	e          *hmEntry
 }
 
-func hmReadProc(pid int) (hmProc, bool) {
+// ── Process sampling ──────────────────────────────────────────────────────────
+
+func hmReadSnap(pid int) (hmProcSnap, bool) {
 	nameData, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
 	if err != nil {
-		return hmProc{}, false
+		return hmProcSnap{}, false
 	}
-
 	statData, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
-		return hmProc{}, false
+		return hmProcSnap{}, false
 	}
 	s := string(statData)
 	end := strings.LastIndex(s, ")")
 	if end < 0 {
-		return hmProc{}, false
+		return hmProcSnap{}, false
 	}
 	fields := strings.Fields(s[end+2:])
 	if len(fields) < 13 {
-		return hmProc{}, false
+		return hmProcSnap{}, false
 	}
 	utime, _ := strconv.ParseUint(fields[11], 10, 64)
 	stime, _ := strconv.ParseUint(fields[12], 10, 64)
 
 	var memKB int64
-	if sf, err := os.Open(fmt.Sprintf("/proc/%d/status", pid)); err == nil {
-		sc := bufio.NewScanner(sf)
+	if f, err := os.Open(fmt.Sprintf("/proc/%d/status", pid)); err == nil {
+		sc := bufio.NewScanner(f)
 		for sc.Scan() {
 			if line := sc.Text(); strings.HasPrefix(line, "VmRSS:") {
 				if parts := strings.Fields(line); len(parts) >= 2 {
@@ -88,60 +77,47 @@ func hmReadProc(pid int) (hmProc, bool) {
 				break
 			}
 		}
-		sf.Close()
+		f.Close()
 	}
+	return hmProcSnap{pid, strings.TrimSpace(string(nameData)), utime + stime, memKB}, true
+}
 
-	// /proc/[pid]/io requires matching UID or root; fails silently for others
-	var ioBytes uint64
-	if iof, err := os.Open(fmt.Sprintf("/proc/%d/io", pid)); err == nil {
-		sc := bufio.NewScanner(iof)
-		for sc.Scan() {
-			line := sc.Text()
-			if strings.HasPrefix(line, "read_bytes:") || strings.HasPrefix(line, "write_bytes:") {
-				if parts := strings.Fields(line); len(parts) >= 2 {
-					v, _ := strconv.ParseUint(parts[1], 10, 64)
-					ioBytes += v
+func hmSample() map[int]hmProcSnap {
+	matches, _ := filepath.Glob("/proc/[0-9]*/comm")
+	out := make(map[int]hmProcSnap, len(matches))
+	for _, m := range matches {
+		parts := strings.Split(m, "/")
+		if len(parts) >= 3 {
+			if pid, err := strconv.Atoi(parts[2]); err == nil {
+				if snap, ok := hmReadSnap(pid); ok {
+					out[pid] = snap
 				}
 			}
 		}
-		iof.Close()
 	}
-
-	return hmProc{
-		pid:      pid,
-		name:     strings.TrimSpace(string(nameData)),
-		cpuTicks: utime + stime,
-		memKB:    memKB,
-		ioBytes:  ioBytes,
-	}, true
+	return out
 }
 
-func hmSampleAll() map[int]hmProc {
-	pids := hmGetPIDs()
-	result := make(map[int]hmProc, len(pids))
-	for _, pid := range pids {
-		if p, ok := hmReadProc(pid); ok {
-			result[pid] = p
-		}
-	}
-	return result
-}
+// ── Color ─────────────────────────────────────────────────────────────────────
 
-// hmHeatColor maps 0–1 to a cool-to-hot gradient (navy → blue → cyan → green → yellow → orange → red)
+// hmHeatColor maps [0,1] → cool-to-hot gradient: navy → blue → cyan → green → yellow → orange → red
 func hmHeatColor(v float64, grayscale bool) tcell.Color {
 	v = math.Max(0, math.Min(1, v))
 	if grayscale {
 		lum := int32(v * 230)
 		return tcell.NewRGBColor(lum, lum, lum)
 	}
-	type stop struct{ pos float64; r, g, b int32 }
+	type stop struct {
+		pos     float64
+		r, g, b int32
+	}
 	stops := []stop{
 		{0.00, 4, 4, 22},
-		{0.15, 0, 0, 180},
-		{0.30, 0, 110, 255},
+		{0.15, 0, 0, 185},
+		{0.30, 0, 115, 255},
 		{0.45, 0, 210, 200},
-		{0.55, 0, 200, 60},
-		{0.65, 170, 215, 0},
+		{0.55, 0, 200, 55},
+		{0.65, 175, 215, 0},
 		{0.75, 255, 200, 0},
 		{0.85, 255, 95, 0},
 		{0.95, 255, 18, 0},
@@ -161,102 +137,222 @@ func hmHeatColor(v float64, grayscale bool) tcell.Color {
 	return tcell.NewRGBColor(255, 80, 80)
 }
 
-func hmTextColor(heat float64, grayscale bool) tcell.Color {
+func hmFgColor(heat float64, grayscale bool) tcell.Color {
 	if grayscale {
 		if heat > 0.55 {
 			return tcell.NewRGBColor(0, 0, 0)
 		}
 		return tcell.NewRGBColor(255, 255, 255)
 	}
-	// Background turns bright around heat=0.6 (yellow-green); switch to dark text then
 	if heat > 0.58 {
-		return tcell.NewRGBColor(15, 15, 15)
+		return tcell.NewRGBColor(10, 10, 10)
 	}
 	return tcell.NewRGBColor(235, 240, 255)
 }
 
-// hmFillCell draws a heat-colored cell with centered text
-func hmFillCell(screen tcell.Screen, x, y, w int, text string, heat float64, grayscale bool) {
-	bg := hmHeatColor(heat, grayscale)
-	fg := hmTextColor(heat, grayscale)
-	style := tcell.StyleDefault.Background(bg).Foreground(fg)
-	for i := 0; i < w; i++ {
-		screen.SetContent(x+i, y, ' ', nil, style)
+// ── Treemap layout ────────────────────────────────────────────────────────────
+
+// layoutTreemap arranges entries (sorted by memKB desc) into a squarified strip treemap.
+// charAspect corrects for terminal cells being ~2× taller than wide visually.
+func layoutTreemap(entries []hmEntry, W, H int) []tmRect {
+	var totalMem int64
+	for i := range entries {
+		totalMem += entries[i].memKB
 	}
-	runes := []rune(text)
-	if len(runes) > w {
-		runes = runes[:w]
+	if totalMem == 0 || W == 0 || H == 0 {
+		return nil
 	}
-	startX := x + (w-len(runes))/2
-	for i, ch := range runes {
-		if startX+i >= x && startX+i < x+w {
-			screen.SetContent(startX+i, y, ch, nil, style)
+
+	const charAspect = 2.1 // visual pixel width : pixel height per cell
+
+	var rects []tmRect
+	y, i := 0, 0
+
+	for i < len(entries) && y < H {
+		remainingH := H - y
+
+		// remaining memory for processes not yet placed
+		var remainingMem int64
+		for j := i; j < len(entries); j++ {
+			remainingMem += entries[j].memKB
 		}
+
+		// Squarification: find how many items minimize the worst aspect ratio in this strip
+		bestN := 1
+		bestWorst := math.MaxFloat64
+
+		for n := 1; n <= len(entries)-i; n++ {
+			var stripMem int64
+			for j := 0; j < n; j++ {
+				stripMem += entries[i+j].memKB
+			}
+			stripH := float64(remainingH) * float64(stripMem) / float64(remainingMem)
+
+			worst := 0.0
+			for j := 0; j < n; j++ {
+				cellW := float64(W) * float64(entries[i+j].memKB) / float64(stripMem)
+				pixW := cellW * charAspect
+				pixH := stripH
+				var ar float64
+				if pixW > 0 && pixH > 0 {
+					ar = math.Max(pixW/pixH, pixH/pixW)
+				} else {
+					ar = math.MaxFloat64
+				}
+				if ar > worst {
+					worst = ar
+				}
+			}
+			if n == 1 || worst <= bestWorst {
+				bestWorst = worst
+				bestN = n
+			} else {
+				break
+			}
+		}
+
+		var stripMem int64
+		for j := 0; j < bestN; j++ {
+			stripMem += entries[i+j].memKB
+		}
+		stripH := int(math.Round(float64(remainingH) * float64(stripMem) / float64(remainingMem)))
+		if stripH < 1 {
+			stripH = 1
+		}
+		if y+stripH > H {
+			stripH = H - y
+		}
+
+		x := 0
+		for j := 0; j < bestN; j++ {
+			var cellW int
+			if j == bestN-1 {
+				cellW = W - x
+			} else {
+				cellW = int(math.Round(float64(W) * float64(entries[i+j].memKB) / float64(stripMem)))
+				if cellW < 1 {
+					cellW = 1
+				}
+			}
+			if x+cellW > W {
+				cellW = W - x
+			}
+			if cellW > 0 && stripH > 0 {
+				rects = append(rects, tmRect{x, y, cellW, stripH, &entries[i+j]})
+			}
+			x += cellW
+		}
+
+		y += stripH
+		i += bestN
 	}
+	return rects
 }
 
-func hmDrawText(screen tcell.Screen, x, y int, text string, style tcell.Style) {
-	for i, ch := range text {
-		screen.SetContent(x+i, y, ch, nil, style)
-	}
-}
-
-func hmCenterPad(s string, width int) string {
-	if len(s) >= width {
-		return s[:width]
-	}
-	pad := (width - len(s)) / 2
-	out := strings.Repeat(" ", pad) + s
-	for len(out) < width {
-		out += " "
-	}
-	return out
-}
+// ── Rendering ─────────────────────────────────────────────────────────────────
 
 func hmFmtMem(kb int64) string {
 	switch {
 	case kb >= 1024*1024:
 		return fmt.Sprintf("%.1fGB", float64(kb)/1048576)
 	case kb >= 1024:
-		return fmt.Sprintf("%.1fMB", float64(kb)/1024)
+		return fmt.Sprintf("%.0fMB", float64(kb)/1024)
 	default:
 		return fmt.Sprintf("%dKB", kb)
 	}
 }
 
-func hmFmtDisk(bps float64) string {
-	switch {
-	case bps >= 1e9:
-		return fmt.Sprintf("%.1fGB/s", bps/1e9)
-	case bps >= 1e6:
-		return fmt.Sprintf("%.1fMB/s", bps/1e6)
-	case bps >= 1e3:
-		return fmt.Sprintf("%.1fKB/s", bps/1e3)
-	default:
-		return fmt.Sprintf("%.0fB/s", bps)
+func hmRenderRect(screen tcell.Screen, r tmRect, grayscale bool) {
+	bg := hmHeatColor(r.e.cpuHeat, grayscale)
+	fg := hmFgColor(r.e.cpuHeat, grayscale)
+	fill := tcell.StyleDefault.Background(bg).Foreground(fg)
+
+	// Fill background
+	for row := r.y; row < r.y+r.h; row++ {
+		for col := r.x; col < r.x+r.w; col++ {
+			screen.SetContent(col, row, ' ', nil, fill)
+		}
+	}
+
+	// Thin dark border on left and top edges (shared borders save space)
+	borderCol := tcell.NewRGBColor(0, 0, 0)
+	if grayscale {
+		borderCol = tcell.NewRGBColor(8, 8, 8)
+	}
+	border := tcell.StyleDefault.Background(borderCol)
+	if r.x > 0 {
+		for row := r.y; row < r.y+r.h; row++ {
+			screen.SetContent(r.x, row, ' ', nil, border)
+		}
+	}
+	if r.y > 0 {
+		for col := r.x; col < r.x+r.w; col++ {
+			screen.SetContent(col, r.y, ' ', nil, border)
+		}
+	}
+
+	// Interior dimensions (inside the 1-char border where applicable)
+	ix := r.x
+	iy := r.y
+	iw := r.w
+	ih := r.h
+	if r.x > 0 {
+		ix++
+		iw--
+	}
+	if r.y > 0 {
+		iy++
+		ih--
+	}
+	if iw < 1 || ih < 1 {
+		return
+	}
+
+	// Render text labels centered in the interior
+	var lines []string
+	name := r.e.name
+	maxLabelW := iw - 2
+	if maxLabelW < 1 {
+		return
+	}
+	if len([]rune(name)) > maxLabelW {
+		runes := []rune(name)
+		if maxLabelW > 1 {
+			name = string(runes[:maxLabelW-1]) + "…"
+		} else {
+			name = string(runes[:maxLabelW])
+		}
+	}
+	lines = append(lines, name)
+	if ih >= 2 && iw >= 7 {
+		lines = append(lines, hmFmtMem(r.e.memKB))
+	}
+	if ih >= 3 && iw >= 9 {
+		cpuPct := r.e.cpuRaw / float64(hmClockTick) * 100
+		lines = append(lines, fmt.Sprintf("cpu %.1f%%", cpuPct))
+	}
+
+	startY := iy + (ih-len(lines))/2
+	for li, line := range lines {
+		ly := startY + li
+		if ly < iy || ly >= iy+ih {
+			continue
+		}
+		runes := []rune(line)
+		startX := ix + (iw-len(runes))/2
+		for ci, ch := range runes {
+			lx := startX + ci
+			if lx >= ix && lx < ix+iw {
+				screen.SetContent(lx, ly, ch, nil, fill)
+			}
+		}
 	}
 }
 
+// ── Main loop ─────────────────────────────────────────────────────────────────
+
 func runHeatmap(screen tcell.Screen, sigChan chan os.Signal, interactive bool, grayscale bool) bool {
 	w, h := screen.Size()
-
-	// Calculate column widths from total width
-	calcLayout := func(width int) (nameW, cpuW, memW, diskW int) {
-		nameW = 20
-		if width >= 100 {
-			nameW = 26
-		} else if width < 60 {
-			nameW = 14
-		}
-		rem := width - nameW - 4 // 4 vertical separators
-		if rem < 24 {
-			rem = 24
-		}
-		cpuW = rem / 3
-		memW = rem / 3
-		diskW = rem - cpuW - memW
-		return
-	}
 
 	eventChan := make(chan tcell.Event, 10)
 	go func() {
@@ -265,10 +361,10 @@ func runHeatmap(screen tcell.Screen, sigChan chan os.Signal, interactive bool, g
 		}
 	}()
 
-	statsChan := make(chan map[int]hmProc, 1)
+	statsChan := make(chan map[int]hmProcSnap, 1)
 	go func() {
 		for {
-			statsChan <- hmSampleAll()
+			statsChan <- hmSample()
 			time.Sleep(hmPollRate)
 		}
 	}()
@@ -276,131 +372,79 @@ func runHeatmap(screen tcell.Screen, sigChan chan os.Signal, interactive bool, g
 	drawTick := time.NewTicker(50 * time.Millisecond)
 	defer drawTick.Stop()
 
-	var prevSample map[int]hmProc
-	var rows []hmRow
+	var prev map[int]hmProcSnap
+	var entries []hmEntry
 	var lastSample time.Time
-	// Track current heat state by process name for smooth transitions
-	heatByName := make(map[string][3]float64) // [cpuHeat, memHeat, diskHeat]
-
-	// Styles (precomputed, refreshed on each draw to support resize)
-	mkStyles := func() (title, header, sep, legend tcell.Style) {
-		if grayscale {
-			title = tcell.StyleDefault.Background(tcell.NewRGBColor(35, 35, 35)).Foreground(tcell.NewRGBColor(240, 240, 240))
-			header = tcell.StyleDefault.Background(tcell.NewRGBColor(20, 20, 20)).Foreground(tcell.NewRGBColor(190, 190, 190))
-			sep = tcell.StyleDefault.Background(tcell.NewRGBColor(25, 25, 25)).Foreground(tcell.NewRGBColor(110, 110, 110))
-			legend = tcell.StyleDefault.Background(tcell.NewRGBColor(10, 10, 10)).Foreground(tcell.NewRGBColor(140, 140, 140))
-		} else {
-			title = tcell.StyleDefault.Background(tcell.NewRGBColor(12, 12, 42)).Foreground(tcell.NewRGBColor(180, 210, 255))
-			header = tcell.StyleDefault.Background(tcell.NewRGBColor(7, 7, 25)).Foreground(tcell.NewRGBColor(120, 158, 238))
-			sep = tcell.StyleDefault.Background(tcell.NewRGBColor(18, 18, 52)).Foreground(tcell.NewRGBColor(65, 75, 155))
-			legend = tcell.StyleDefault.Background(tcell.NewRGBColor(5, 5, 18)).Foreground(tcell.NewRGBColor(110, 125, 195))
-		}
-		return
-	}
+	heatByName := make(map[string]float64)
 
 	for {
 		select {
 		case <-sigChan:
 			return false
 
-		case sample := <-statsChan:
+		case snap := <-statsChan:
 			now := time.Now()
 			elapsed := now.Sub(lastSample).Seconds()
 			if elapsed <= 0 {
 				elapsed = 1
 			}
 
-			if prevSample != nil {
-				type entry struct {
+			if prev != nil {
+				type raw struct {
 					name    string
 					cpuRate float64
 					memKB   int64
-					diskBps float64
 				}
-				entries := make([]entry, 0, len(sample))
-				for pid, curr := range sample {
-					prev, ok := prevSample[pid]
+				rawList := make([]raw, 0, len(snap))
+				for pid, curr := range snap {
+					p, ok := prev[pid]
 					if !ok {
 						continue
 					}
-					var cpuDelta, diskDelta float64
-					if curr.cpuTicks >= prev.cpuTicks {
-						cpuDelta = float64(curr.cpuTicks-prev.cpuTicks) / elapsed
+					var cpuDelta float64
+					if curr.cpuTicks >= p.cpuTicks {
+						cpuDelta = float64(curr.cpuTicks-p.cpuTicks) / elapsed
 					}
-					if curr.ioBytes >= prev.ioBytes {
-						diskDelta = float64(curr.ioBytes-prev.ioBytes) / elapsed
-					}
-					entries = append(entries, entry{curr.name, cpuDelta, curr.memKB, diskDelta})
+					rawList = append(rawList, raw{curr.name, cpuDelta, curr.memKB})
 				}
 
-				// Normalization denominators
-				var maxCPU, maxDisk float64
-				var maxMem int64
-				for _, e := range entries {
-					if e.cpuRate > maxCPU {
-						maxCPU = e.cpuRate
-					}
-					if e.memKB > maxMem {
-						maxMem = e.memKB
-					}
-					if e.diskBps > maxDisk {
-						maxDisk = e.diskBps
+				// Sort by memory descending, limit count
+				sort.Slice(rawList, func(i, j int) bool {
+					return rawList[i].memKB > rawList[j].memKB
+				})
+				if len(rawList) > hmMaxProcs {
+					rawList = rawList[:hmMaxProcs]
+				}
+
+				var maxCPU float64
+				for _, r := range rawList {
+					if r.cpuRate > maxCPU {
+						maxCPU = r.cpuRate
 					}
 				}
 				if maxCPU < 1 {
 					maxCPU = 1
 				}
-				if maxMem < 1 {
-					maxMem = 1
-				}
-				if maxDisk < 1 {
-					maxDisk = 1
-				}
 
-				// Sort hottest first (combined normalized score)
-				sort.Slice(entries, func(i, j int) bool {
-					si := entries[i].cpuRate/maxCPU + float64(entries[i].memKB)/float64(maxMem) + entries[i].diskBps/maxDisk
-					sj := entries[j].cpuRate/maxCPU + float64(entries[j].memKB)/float64(maxMem) + entries[j].diskBps/maxDisk
-					return si > sj
-				})
-
-				maxRows := h - 5
-				if maxRows < 1 {
-					maxRows = 1
-				}
-				if len(entries) > maxRows {
-					entries = entries[:maxRows]
-				}
-
-				newRows := make([]hmRow, len(entries))
-				for i, e := range entries {
-					tCPU := e.cpuRate / maxCPU
-					tMem := float64(e.memKB) / float64(maxMem)
-					tDisk := e.diskBps / maxDisk
-
-					// Inherit current heat values for smooth animation
-					cHeat := heatByName[e.name]
-					if _, seen := heatByName[e.name]; !seen {
-						cHeat = [3]float64{tCPU * 0.5, tMem * 0.5, tDisk * 0.5}
+				newEntries := make([]hmEntry, len(rawList))
+				for i, r := range rawList {
+					target := r.cpuRate / maxCPU
+					current, seen := heatByName[r.name]
+					if !seen {
+						current = target * 0.5
 					}
-
-					newRows[i] = hmRow{
-						name:       e.name,
-						cpuRaw:     e.cpuRate,
-						memKB:      e.memKB,
-						diskBps:    e.diskBps,
-						cpuHeat:    cHeat[0],
-						memHeat:    cHeat[1],
-						diskHeat:   cHeat[2],
-						cpuTarget:  tCPU,
-						memTarget:  tMem,
-						diskTarget: tDisk,
+					newEntries[i] = hmEntry{
+						name:      r.name,
+						memKB:     r.memKB,
+						cpuRaw:    r.cpuRate,
+						cpuHeat:   current,
+						cpuTarget: target,
 					}
 				}
-				rows = newRows
+				entries = newEntries
 			}
 
-			prevSample = sample
+			prev = snap
 			lastSample = now
 
 		case event := <-eventChan:
@@ -421,162 +465,82 @@ func runHeatmap(screen tcell.Screen, sigChan chan os.Signal, interactive bool, g
 			}
 
 		case <-drawTick.C:
-			// Animate heat values toward targets and update name cache
-			for i := range rows {
-				rows[i].cpuHeat += (rows[i].cpuTarget - rows[i].cpuHeat) * hmLerpFactor
-				rows[i].memHeat += (rows[i].memTarget - rows[i].memHeat) * hmLerpFactor
-				rows[i].diskHeat += (rows[i].diskTarget - rows[i].diskHeat) * hmLerpFactor
-				heatByName[rows[i].name] = [3]float64{rows[i].cpuHeat, rows[i].memHeat, rows[i].diskHeat}
+			// Animate heat values
+			for i := range entries {
+				entries[i].cpuHeat += (entries[i].cpuTarget - entries[i].cpuHeat) * hmLerpFactor
+				heatByName[entries[i].name] = entries[i].cpuHeat
 			}
 
 			screen.Clear()
 
-			titleStyle, headerStyle, sepStyle, legendStyle := mkStyles()
-			nameW, cpuW, memW, diskW := calcLayout(w)
+			// Treemap fills all but the legend row
+			treemapH := h - 1
 
-			// Column x-offsets for separator positions
-			sep1X := nameW
-			sep2X := sep1X + 1 + cpuW
-			sep3X := sep2X + 1 + memW
-
-			// ── Title bar ──
-			for x := 0; x < w; x++ {
-				screen.SetContent(x, 0, ' ', nil, titleStyle)
-			}
-			titleText := " ◈  PROCESS RESOURCE HEATMAP  ◈ "
-			tx := (w - len(titleText)) / 2
-			if tx < 0 {
-				tx = 0
-			}
-			hmDrawText(screen, tx, 0, titleText, titleStyle.Bold(true))
-
-			// ── Column headers ──
-			for x := 0; x < w; x++ {
-				screen.SetContent(x, 1, ' ', nil, headerStyle)
-			}
-			hmDrawText(screen, 0, 1, hmCenterPad("PROCESS", nameW), headerStyle)
-			screen.SetContent(sep1X, 1, '│', nil, sepStyle)
-			hmDrawText(screen, sep1X+1, 1, hmCenterPad("CPU %", cpuW), headerStyle)
-			screen.SetContent(sep2X, 1, '│', nil, sepStyle)
-			hmDrawText(screen, sep2X+1, 1, hmCenterPad("MEMORY", memW), headerStyle)
-			screen.SetContent(sep3X, 1, '│', nil, sepStyle)
-			hmDrawText(screen, sep3X+1, 1, hmCenterPad("DISK I/O", diskW), headerStyle)
-
-			// ── Header separator ──
-			for x := 0; x < w; x++ {
-				screen.SetContent(x, 2, '─', nil, sepStyle)
-			}
-			for _, jx := range []int{sep1X, sep2X, sep3X} {
-				if jx < w {
-					screen.SetContent(jx, 2, '┬', nil, sepStyle)
+			if len(entries) == 0 {
+				bgStyle := tcell.StyleDefault.Background(tcell.NewRGBColor(4, 4, 18))
+				for y := 0; y < treemapH; y++ {
+					for x := 0; x < w; x++ {
+						screen.SetContent(x, y, ' ', nil, bgStyle)
+					}
 				}
-			}
-
-			// ── Process rows ──
-			if len(rows) == 0 {
-				loadStyle := tcell.StyleDefault.Background(tcell.NewRGBColor(5, 5, 18)).Foreground(tcell.NewRGBColor(80, 100, 180))
-				if grayscale {
-					loadStyle = tcell.StyleDefault.Background(tcell.NewRGBColor(10, 10, 10)).Foreground(tcell.NewRGBColor(130, 130, 130))
-				}
+				msgStyle := bgStyle.Foreground(tcell.NewRGBColor(70, 90, 170))
 				msg := "Sampling processes…"
 				mx := (w - len(msg)) / 2
 				if mx < 0 {
 					mx = 0
 				}
-				hmDrawText(screen, mx, h/2, msg, loadStyle)
-			}
-
-			for ri, row := range rows {
-				y := 3 + ri
-				if y >= h-2 {
-					break
+				for i, ch := range msg {
+					screen.SetContent(mx+i, treemapH/2, ch, nil, msgStyle)
 				}
-
-				// Alternating dark name column
-				var nameBg tcell.Color
-				if ri%2 == 0 {
-					if grayscale {
-						nameBg = tcell.NewRGBColor(18, 18, 18)
-					} else {
-						nameBg = tcell.NewRGBColor(10, 10, 26)
-					}
-				} else {
-					if grayscale {
-						nameBg = tcell.NewRGBColor(10, 10, 10)
-					} else {
-						nameBg = tcell.NewRGBColor(6, 6, 17)
-					}
-				}
-				var nameFg tcell.Color
-				if grayscale {
-					nameFg = tcell.NewRGBColor(205, 205, 205)
-				} else {
-					nameFg = tcell.NewRGBColor(205, 215, 240)
-				}
-				nameStyle := tcell.StyleDefault.Background(nameBg).Foreground(nameFg)
-
-				for x := 0; x < nameW; x++ {
-					screen.SetContent(x, y, ' ', nil, nameStyle)
-				}
-				name := " " + row.name
-				runes := []rune(name)
-				if len(runes) > nameW {
-					runes = runes[:nameW-1]
-					runes = append(runes, '…')
-				}
-				for i, ch := range runes {
-					if i < nameW {
-						screen.SetContent(i, y, ch, nil, nameStyle)
-					}
-				}
-
-				screen.SetContent(sep1X, y, '│', nil, sepStyle)
-				cpuPct := row.cpuRaw / float64(hmClockTick) * 100
-				hmFillCell(screen, sep1X+1, y, cpuW, fmt.Sprintf("%.1f%%", cpuPct), row.cpuHeat, grayscale)
-
-				screen.SetContent(sep2X, y, '│', nil, sepStyle)
-				hmFillCell(screen, sep2X+1, y, memW, hmFmtMem(row.memKB), row.memHeat, grayscale)
-
-				screen.SetContent(sep3X, y, '│', nil, sepStyle)
-				hmFillCell(screen, sep3X+1, y, diskW, hmFmtDisk(row.diskBps), row.diskHeat, grayscale)
-			}
-
-			// ── Bottom separator ──
-			if h >= 3 {
-				for x := 0; x < w; x++ {
-					screen.SetContent(x, h-2, '─', nil, sepStyle)
-				}
-				for _, jx := range []int{sep1X, sep2X, sep3X} {
-					if jx < w {
-						screen.SetContent(jx, h-2, '┴', nil, sepStyle)
-					}
+			} else {
+				rects := layoutTreemap(entries, w, treemapH)
+				for _, r := range rects {
+					hmRenderRect(screen, r, grayscale)
 				}
 			}
 
-			// ── Legend ──
+			// Legend bar (bottom row)
+			legendBg := tcell.NewRGBColor(0, 0, 0)
+			if grayscale {
+				legendBg = tcell.NewRGBColor(6, 6, 6)
+			}
+			legendFg := tcell.NewRGBColor(130, 148, 215)
+			if grayscale {
+				legendFg = tcell.NewRGBColor(155, 155, 155)
+			}
+			legStyle := tcell.StyleDefault.Background(legendBg).Foreground(legendFg)
 			for x := 0; x < w; x++ {
-				screen.SetContent(x, h-1, ' ', nil, legendStyle)
+				screen.SetContent(x, h-1, ' ', nil, legStyle)
 			}
-			hmDrawText(screen, 1, h-1, "HEAT:", legendStyle)
-			lx := 7
-			gradW := w / 4
-			if gradW > 48 {
-				gradW = 48
+			lx := 1
+			label := "size=MEM  color=CPU  "
+			for _, ch := range label {
+				if lx < w {
+					screen.SetContent(lx, h-1, ch, nil, legStyle)
+					lx++
+				}
 			}
-			if gradW < 8 {
-				gradW = 8
+			gradW := w / 5
+			if gradW > 40 {
+				gradW = 40
 			}
-			for i := 0; i < gradW; i++ {
+			if gradW < 6 {
+				gradW = 6
+			}
+			for i := 0; i < gradW && lx+i < w; i++ {
 				hv := float64(i) / float64(gradW-1)
 				col := hmHeatColor(hv, grayscale)
-				bg := tcell.NewRGBColor(5, 5, 18)
-				if grayscale {
-					bg = tcell.NewRGBColor(10, 10, 10)
-				}
-				screen.SetContent(lx+i, h-1, '█', nil, tcell.StyleDefault.Foreground(col).Background(bg))
+				screen.SetContent(lx+i, h-1, '█', nil,
+					tcell.StyleDefault.Foreground(col).Background(legendBg))
 			}
 			lx += gradW + 1
-			hmDrawText(screen, lx, h-1, "low → high   [sorted by combined activity]", legendStyle)
+			suffix := " low→high"
+			for _, ch := range suffix {
+				if lx < w {
+					screen.SetContent(lx, h-1, ch, nil, legStyle)
+					lx++
+				}
+			}
 
 			screen.Show()
 		}
