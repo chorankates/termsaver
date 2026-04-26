@@ -72,9 +72,7 @@ func runFuzzyTime(screen tcell.Screen, sigChan chan os.Signal, interactive bool,
 		case <-ticker.C:
 			now := time.Now()
 			elapsed := now.Sub(startTime).Seconds()
-			// Full color cycle every 90 seconds
 			colorPhase := elapsed / 90.0
-			// Subtle breathing: lightness oscillates gently
 			breathe := 0.05 * math.Sin(elapsed*0.4)
 
 			refreshBgChars(bgChars, w, h)
@@ -82,31 +80,81 @@ func runFuzzyTime(screen tcell.Screen, sigChan chan os.Signal, interactive bool,
 			phrase := fuzzyTimePhrase(now)
 			modLine, hourLine := splitFuzzyPhrase(phrase)
 
-			// Draw dim background fill (no screen.Clear needed — every cell is set)
-			for y := 0; y < h; y++ {
-				for x := 0; x < w; x++ {
-					bgPhase := colorPhase + float64(x)*0.005 + float64(y)*0.011
-					bgColor := fuzzyHSLColor(bgPhase, 0.25, 0.17+breathe*0.3, grayscale)
-					screen.SetContent(x, y, bgChars[y][x], nil, tcell.StyleDefault.Foreground(bgColor))
+			modRunes := []rune(modLine)
+			hourRunes := []rune(hourLine)
+
+			centerY := h / 2
+			modY := centerY
+			hourY := -1
+			if hourLine != "" {
+				modY = centerY - 1
+				hourY = centerY + 1
+			}
+
+			modX := (w - len(modRunes)) / 2
+			if modX < 0 {
+				modX = 0
+			}
+			hourX := (w - len(hourRunes)) / 2
+			if hourX < 0 {
+				hourX = 0
+			}
+
+			// Stamp phrase letters into the background grid so they're part of it
+			for i, ch := range modRunes {
+				if ch != ' ' {
+					bgChars[modY][modX+i] = ch
+				}
+			}
+			if hourY >= 0 {
+				for i, ch := range hourRunes {
+					if ch != ' ' {
+						bgChars[hourY][hourX+i] = ch
+					}
 				}
 			}
 
-			centerY := h / 2
+			// Render whole grid: background is grayscale, phrase chars emerge by color alone
+			for y := 0; y < h; y++ {
+				for x := 0; x < w; x++ {
+					isPhraseChar := false
+					var charPhase float64
 
-			if hourLine == "" {
-				// Single-word phrase: "noon" or "midnight"
-				drawFuzzyLine(screen, modLine, w, centerY, colorPhase, 0.0, 0.80+breathe, 1.0, grayscale)
-			} else {
-				drawFuzzyLine(screen, modLine, w, centerY-1, colorPhase, 0.0, 0.78+breathe, 1.0, grayscale)
-				drawFuzzyLine(screen, hourLine, w, centerY+1, colorPhase, 0.08, 0.82+breathe, 1.0, grayscale)
+					if y == modY && x >= modX && x < modX+len(modRunes) {
+						i := x - modX
+						if modRunes[i] != ' ' {
+							isPhraseChar = true
+							charPhase = colorPhase + float64(i)*0.008
+						}
+					} else if hourY >= 0 && y == hourY && x >= hourX && x < hourX+len(hourRunes) {
+						i := x - hourX
+						if hourRunes[i] != ' ' {
+							isPhraseChar = true
+							charPhase = colorPhase + 0.08 + float64(i)*0.008
+						}
+					}
+
+					if isPhraseChar {
+						var color tcell.Color
+						if grayscale {
+							color = fuzzyHSLColor(charPhase, 0.0, 0.72+breathe, true)
+						} else {
+							color = fuzzyHSLColor(charPhase, 1.0, 0.58+breathe, false)
+						}
+						screen.SetContent(x, y, bgChars[y][x], nil, tcell.StyleDefault.Foreground(color))
+					} else {
+						bgPhase := colorPhase + float64(x)*0.005 + float64(y)*0.011
+						bgColor := fuzzyHSLColor(bgPhase, 0.0, 0.36+breathe*0.3, true)
+						screen.SetContent(x, y, bgChars[y][x], nil, tcell.StyleDefault.Foreground(bgColor))
+					}
+				}
 			}
 
-			// Seconds progress bar
 			drawFuzzySecondsBar(screen, now, w, h, colorPhase, grayscale)
 
 			// Actual time, dim, top-right corner
 			actualTime := now.Format("15:04:05")
-			dimColor := fuzzyHSLColor(colorPhase, 0.4, 0.38, grayscale)
+			dimColor := fuzzyHSLColor(colorPhase, 0.5, 0.50, grayscale)
 			dimStyle := tcell.StyleDefault.Foreground(dimColor)
 			for i, ch := range actualTime {
 				screen.SetContent(w-len(actualTime)+i, 0, ch, nil, dimStyle)
@@ -114,20 +162,6 @@ func runFuzzyTime(screen tcell.Screen, sigChan chan os.Signal, interactive bool,
 
 			screen.Show()
 		}
-	}
-}
-
-func drawFuzzyLine(screen tcell.Screen, text string, w, y int, phase, phaseOffset, lightness, saturation float64, grayscale bool) {
-	runeSlice := []rune(text)
-	x := (w - len(runeSlice)) / 2
-	if x < 0 {
-		x = 0
-	}
-	for i, ch := range runeSlice {
-		charPhase := phase + phaseOffset + float64(i)*0.008
-		color := fuzzyHSLColor(charPhase, saturation, lightness, grayscale)
-		style := tcell.StyleDefault.Foreground(color).Bold(true)
-		screen.SetContent(x+i, y, ch, nil, style)
 	}
 }
 
