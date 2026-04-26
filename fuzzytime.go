@@ -80,8 +80,8 @@ func runFuzzyTime(screen tcell.Screen, sigChan chan os.Signal, interactive bool,
 			phrase := fuzzyTimePhrase(now)
 			modLine, hourLine := splitFuzzyPhrase(phrase)
 
-			modRunes := []rune(modLine)
-			hourRunes := []rune(hourLine)
+			modRunes := []rune(expandPhrase(modLine))
+			hourRunes := []rune(expandPhrase(hourLine))
 
 			centerY := h / 2
 			modY := centerY
@@ -237,6 +237,15 @@ func fuzzyMinuteWord(m int) string {
 		return "half"
 	}
 	return ""
+}
+
+func expandPhrase(s string) string {
+	words := strings.Fields(s)
+	expanded := make([]string, len(words))
+	for i, w := range words {
+		expanded[i] = strings.Join(strings.Split(w, ""), " ")
+	}
+	return strings.Join(expanded, "   ")
 }
 
 func splitFuzzyPhrase(phrase string) (string, string) {
