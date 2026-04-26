@@ -50,6 +50,8 @@ func runFuzzyTime(screen tcell.Screen, sigChan chan os.Signal, interactive bool,
 	defer ticker.Stop()
 
 	startTime := time.Now()
+	lastPhrase := ""
+	phraseHue := rand.Float64()
 
 	for {
 		select {
@@ -78,6 +80,10 @@ func runFuzzyTime(screen tcell.Screen, sigChan chan os.Signal, interactive bool,
 			refreshBgChars(bgChars, w, h)
 
 			phrase := fuzzyTimePhrase(now)
+			if phrase != lastPhrase {
+				phraseHue = rand.Float64()
+				lastPhrase = phrase
+			}
 			modLine, hourLine := splitFuzzyPhrase(phrase)
 
 			modRunes := []rune(expandPhrase(modLine))
@@ -115,44 +121,34 @@ func runFuzzyTime(screen tcell.Screen, sigChan chan os.Signal, interactive bool,
 			}
 
 			// Render whole grid: background is grayscale, phrase chars emerge by color alone
+			phraseColor := fuzzyHSLColor(phraseHue, 1.0, 0.58+breathe, grayscale)
 			for y := 0; y < h; y++ {
 				for x := 0; x < w; x++ {
 					isPhraseChar := false
-					var charPhase float64
 
 					if y == modY && x >= modX && x < modX+len(modRunes) {
 						i := x - modX
 						if modRunes[i] != ' ' {
 							isPhraseChar = true
-							charPhase = colorPhase + float64(i)*0.008
 						}
 					} else if hourY >= 0 && y == hourY && x >= hourX && x < hourX+len(hourRunes) {
 						i := x - hourX
 						if hourRunes[i] != ' ' {
 							isPhraseChar = true
-							charPhase = colorPhase + 0.08 + float64(i)*0.008
 						}
 					}
 
 					if isPhraseChar {
-						var color tcell.Color
-						if grayscale {
-							color = fuzzyHSLColor(charPhase, 0.0, 0.72+breathe, true)
-						} else {
-							color = fuzzyHSLColor(charPhase, 1.0, 0.58+breathe, false)
-						}
-						screen.SetContent(x, y, bgChars[y][x], nil, tcell.StyleDefault.Foreground(color))
+						screen.SetContent(x, y, bgChars[y][x], nil, tcell.StyleDefault.Foreground(phraseColor))
 					} else {
 						bgPhase := colorPhase + float64(x)*0.005 + float64(y)*0.011
-						bgColor := fuzzyHSLColor(bgPhase, 0.0, 0.36+breathe*0.3, true)
+						bgColor := fuzzyHSLColor(bgPhase, 0.0, 0.22+breathe*0.3, true)
 						screen.SetContent(x, y, bgChars[y][x], nil, tcell.StyleDefault.Foreground(bgColor))
 					}
 				}
 			}
 
-			drawFuzzySecondsBar(screen, now, w, h, colorPhase, grayscale)
-
-			// Actual time, dim, top-right corner
+// Actual time, dim, top-right corner
 			actualTime := now.Format("15:04:05")
 			dimColor := fuzzyHSLColor(colorPhase, 0.5, 0.50, grayscale)
 			dimStyle := tcell.StyleDefault.Foreground(dimColor)
@@ -162,28 +158,6 @@ func runFuzzyTime(screen tcell.Screen, sigChan chan os.Signal, interactive bool,
 
 			screen.Show()
 		}
-	}
-}
-
-func drawFuzzySecondsBar(screen tcell.Screen, now time.Time, w, h int, colorPhase float64, grayscale bool) {
-	sec := now.Second()
-	barWidth := w - 4
-	if barWidth <= 0 {
-		return
-	}
-	filled := (sec * barWidth) / 60
-	barY := h - 2
-	for x := 0; x < barWidth; x++ {
-		var ch rune
-		var color tcell.Color
-		if x < filled {
-			ch = '━'
-			color = fuzzyHSLColor(colorPhase+0.5, 0.9, 0.65, grayscale)
-		} else {
-			ch = '─'
-			color = fuzzyHSLColor(colorPhase+0.5, 0.2, 0.22, grayscale)
-		}
-		screen.SetContent(x+2, barY, ch, nil, tcell.StyleDefault.Foreground(color))
 	}
 }
 
