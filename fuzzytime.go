@@ -141,9 +141,7 @@ func runFuzzyTime(screen tcell.Screen, sigChan chan os.Signal, interactive bool,
 					if isPhraseChar {
 						screen.SetContent(x, y, bgChars[y][x], nil, tcell.StyleDefault.Foreground(phraseColor))
 					} else {
-						bgPhase := colorPhase + float64(x)*0.005 + float64(y)*0.011
-						bgColor := fuzzyHSLColor(bgPhase, 0.0, 0.22+breathe*0.3, true)
-						screen.SetContent(x, y, bgChars[y][x], nil, tcell.StyleDefault.Foreground(bgColor))
+						screen.SetContent(x, y, bgChars[y][x], nil, tcell.StyleDefault.Foreground(tcell.NewRGBColor(56, 56, 56)))
 					}
 				}
 			}
