@@ -13,7 +13,7 @@ import (
 )
 
 func main() {
-	var mode = flag.String("mode", "random", "Visualization mode: matrix, nyancat, snake, missiledefender, spectrograph, snowflakes, waterripple, lightning, or random")
+	var mode = flag.String("mode", "random", "Visualization mode: matrix, nyancat, snake, missiledefender, spectrograph, snowflakes, waterripple, lightning, aurora, or random")
 	var interactive = flag.Bool("interactive", false, "Enable interactive mode (for snake: use arrow keys to play)")
 	var grayscale = flag.Bool("grayscale", false, "Use grayscale colors instead of colors")
 	var windChangeTime = flag.Float64("wind-change-time", 3.0, "Time in seconds between wind direction changes (snowflakes mode)")
@@ -39,7 +39,7 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	// All available modes for cycling
-	allModes := []string{"matrix", "nyancat", "snake", "missiledefender", "spectrograph", "snowflakes", "waterripple", "lightning"}
+	allModes := []string{"matrix", "nyancat", "snake", "missiledefender", "spectrograph", "snowflakes", "waterripple", "lightning", "aurora"}
 
 	// Handle random mode selection
 	selectedMode := *mode
@@ -79,9 +79,11 @@ func main() {
 			cycleToNext = runWaterRipple(screen, sigChan, *interactive, *grayscale)
 		case "lightning":
 			cycleToNext = runLightning(screen, sigChan, *interactive, *grayscale)
+		case "aurora":
+			cycleToNext = runAurora(screen, sigChan, *interactive, *grayscale)
 		default:
 			screen.Fini()
-			fmt.Fprintf(os.Stderr, "Unknown mode: %s. Use: matrix, nyancat, snake, missiledefender, spectrograph, snowflakes, waterripple, lightning, or random\n", *mode)
+			fmt.Fprintf(os.Stderr, "Unknown mode: %s. Use: matrix, nyancat, snake, missiledefender, spectrograph, snowflakes, waterripple, lightning, aurora, or random\n", *mode)
 			os.Exit(1)
 		}
 
