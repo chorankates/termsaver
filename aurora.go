@@ -314,6 +314,30 @@ func aurDrawLabels(screen tcell.Screen, w, h int, state *aurState, grayscale boo
 		label := fmt.Sprintf("C%-2d %3d%%", i, pct)
 		aurDrawCentered(screen, x0, pctRow, colW, label, style)
 	}
+
+	// Aggregate average in the top-right corner.
+	avg := 0.0
+	for _, l := range state.loads {
+		avg += l
+	}
+	avg /= float64(n)
+	avgPct := int(math.Round(avg * 100))
+	avgLabel := fmt.Sprintf(" avg %d%% ", avgPct)
+	avgFg := tcell.NewRGBColor(100, 120, 150)
+	if grayscale {
+		avgFg = tcell.NewRGBColor(110, 110, 110)
+	}
+	avgStyle := tcell.StyleDefault.Foreground(avgFg).Background(dark)
+	runes := []rune(avgLabel)
+	startX := w - len(runes)
+	if startX < 0 {
+		startX = 0
+	}
+	for i, r := range runes {
+		if startX+i < w {
+			screen.SetContent(startX+i, sepRow, r, nil, avgStyle)
+		}
+	}
 }
 
 func aurDrawCentered(screen tcell.Screen, x0, y, colW int, s string, style tcell.Style) {
