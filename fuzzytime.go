@@ -12,6 +12,116 @@ import (
 
 var bgAlphabet = []rune("abcdefghijklmnopqrstuvwxyz")
 
+// Block font: 4 pixels wide × 5 pixels tall per glyph.
+// Each pixel renders as 1 terminal column × 2 terminal rows.
+const (
+	bigFontW   = 4 // pixels wide per glyph
+	bigFontH   = 5 // pixels tall per glyph
+	bigScaleX  = 1 // terminal columns per pixel
+	bigScaleY  = 2 // terminal rows per pixel
+	bigCharGap = 1 // terminal columns between glyphs
+	bigWordGap = 3 // terminal columns between words
+)
+
+// Each entry is 5 rows; each row is 4 bits (bit 3 = leftmost column, bit 0 = rightmost).
+var blockFont = map[rune][bigFontH]uint8{
+	'a': {0x6, 0x9, 0xF, 0x9, 0x9}, // .XX. / X..X / XXXX / X..X / X..X
+	'b': {0x8, 0xE, 0x9, 0x9, 0xE}, // X... / XXX. / X..X / X..X / XXX.
+	'c': {0x7, 0x8, 0x8, 0x8, 0x7}, // .XXX / X... / X... / X... / .XXX
+	'd': {0x1, 0x7, 0x9, 0x9, 0x7}, // ...X / .XXX / X..X / X..X / .XXX
+	'e': {0x6, 0x9, 0xF, 0x8, 0x7}, // .XX. / X..X / XXXX / X... / .XXX
+	'f': {0x7, 0x8, 0xE, 0x8, 0x8}, // .XXX / X... / XXX. / X... / X...
+	'g': {0x7, 0x8, 0xB, 0x9, 0x7}, // .XXX / X... / X.XX / X..X / .XXX
+	'h': {0x8, 0x8, 0xE, 0x9, 0x9}, // X... / X... / XXX. / X..X / X..X
+	'i': {0xE, 0x4, 0x4, 0x4, 0xE}, // XXX. / .X.. / .X.. / .X.. / XXX.
+	'j': {0x7, 0x1, 0x1, 0x9, 0x6}, // .XXX / ...X / ...X / X..X / .XX.
+	'k': {0x9, 0xA, 0xC, 0xA, 0x9}, // X..X / X.X. / XX.. / X.X. / X..X
+	'l': {0xC, 0x4, 0x4, 0x4, 0x7}, // XX.. / .X.. / .X.. / .X.. / .XXX
+	'm': {0x9, 0xF, 0x9, 0x9, 0x9}, // X..X / XXXX / X..X / X..X / X..X
+	'n': {0x8, 0xE, 0x9, 0x9, 0x9}, // X... / XXX. / X..X / X..X / X..X
+	'o': {0x6, 0x9, 0x9, 0x9, 0x6}, // .XX. / X..X / X..X / X..X / .XX.
+	'p': {0xE, 0x9, 0xE, 0x8, 0x8}, // XXX. / X..X / XXX. / X... / X...
+	'q': {0x7, 0x9, 0x7, 0x1, 0x1}, // .XXX / X..X / .XXX / ...X / ...X
+	'r': {0x7, 0x8, 0x8, 0x8, 0x8}, // .XXX / X... / X... / X... / X...
+	's': {0x7, 0x8, 0x6, 0x1, 0xE}, // .XXX / X... / .XX. / ...X / XXX.
+	't': {0xF, 0x4, 0x4, 0x4, 0x3}, // XXXX / .X.. / .X.. / .X.. / ..XX
+	'u': {0x9, 0x9, 0x9, 0x9, 0x7}, // X..X / X..X / X..X / X..X / .XXX
+	'v': {0x9, 0x9, 0x9, 0x6, 0x6}, // X..X / X..X / X..X / .XX. / .XX.
+	'w': {0x9, 0x9, 0x9, 0xF, 0x6}, // X..X / X..X / X..X / XXXX / .XX.
+	'x': {0x9, 0x9, 0x6, 0x9, 0x9}, // X..X / X..X / .XX. / X..X / X..X
+	'y': {0x9, 0x6, 0x6, 0x4, 0x4}, // X..X / .XX. / .XX. / .X.. / .X..
+	'z': {0xF, 0x2, 0x4, 0x8, 0xF}, // XXXX / ..X. / .X.. / X... / XXXX
+	'-': {0x0, 0x0, 0x6, 0x0, 0x0}, // .... / .... / .XX. / .... / ....
+	'\'': {0x6, 0x4, 0x0, 0x0, 0x0}, // .XX. / .X.. / .... / .... / ....
+}
+
+// bigLineWidth returns the terminal-column width of text rendered in block font.
+func bigLineWidth(text string) int {
+	words := strings.Fields(text)
+	total := 0
+	for wi, word := range words {
+		if wi > 0 {
+			total += bigWordGap
+		}
+		for ci := range word {
+			if ci > 0 {
+				total += bigCharGap
+			}
+			total += bigFontW * bigScaleX
+		}
+	}
+	return total
+}
+
+// drawBigLine renders text at (startX, startY) using the block font.
+// On-pixels draw '█' with fg; off-pixels draw the background char with bg.
+func drawBigLine(screen tcell.Screen, text string, startX, startY int, fg, bg tcell.Color, bgGrid [][]rune, w, h int) {
+	fgStyle := tcell.StyleDefault.Foreground(fg)
+	bgStyle := tcell.StyleDefault.Foreground(bg)
+	x := startX
+	for wi, word := range strings.Fields(text) {
+		if wi > 0 {
+			x += bigWordGap
+		}
+		for ci, ch := range word {
+			if ci > 0 {
+				x += bigCharGap
+			}
+			rows, ok := blockFont[ch]
+			if !ok {
+				x += bigFontW * bigScaleX
+				continue
+			}
+			for py := 0; py < bigFontH; py++ {
+				for sy := 0; sy < bigScaleY; sy++ {
+					ty := startY + py*bigScaleY + sy
+					if ty < 0 || ty >= h {
+						continue
+					}
+					for px := 0; px < bigFontW; px++ {
+						for sx := 0; sx < bigScaleX; sx++ {
+							tx := x + px*bigScaleX + sx
+							if tx < 0 || tx >= w {
+								continue
+							}
+							if (rows[py]>>uint(bigFontW-1-px))&1 == 1 {
+								screen.SetContent(tx, ty, '█', nil, fgStyle)
+							} else {
+								var bgRune rune = ' '
+								if ty < len(bgGrid) && tx < len(bgGrid[ty]) {
+									bgRune = bgGrid[ty][tx]
+								}
+								screen.SetContent(tx, ty, bgRune, nil, bgStyle)
+							}
+						}
+					}
+				}
+			}
+			x += bigFontW * bigScaleX
+		}
+	}
+}
+
 func makeBgGrid(w, h int) [][]rune {
 	grid := make([][]rune, h)
 	for y := range grid {
@@ -86,67 +196,42 @@ func runFuzzyTime(screen tcell.Screen, sigChan chan os.Signal, interactive bool,
 			}
 			modLine, hourLine := splitFuzzyPhrase(phrase)
 
-			modRunes := []rune(expandPhrase(modLine))
-			hourRunes := []rune(expandPhrase(hourLine))
-
-			centerY := h / 2
-			modY := centerY
-			hourY := -1
-			if hourLine != "" {
-				modY = centerY - 1
-				hourY = centerY + 1
-			}
-
-			modX := (w - len(modRunes)) / 2
-			if modX < 0 {
-				modX = 0
-			}
-			hourX := (w - len(hourRunes)) / 2
-			if hourX < 0 {
-				hourX = 0
-			}
-
-			// Stamp phrase letters into the background grid so they're part of it
-			for i, ch := range modRunes {
-				if ch != ' ' {
-					bgChars[modY][modX+i] = ch
-				}
-			}
-			if hourY >= 0 {
-				for i, ch := range hourRunes {
-					if ch != ' ' {
-						bgChars[hourY][hourX+i] = ch
-					}
-				}
-			}
-
-			// Render whole grid: background is grayscale, phrase chars emerge by color alone
 			phraseColor := fuzzyHSLColor(phraseHue, 1.0, 0.58+breathe, grayscale)
+			bgDrawColor := tcell.NewRGBColor(56, 56, 56)
+
+			// Render full background grid
 			for y := 0; y < h; y++ {
 				for x := 0; x < w; x++ {
-					isPhraseChar := false
-
-					if y == modY && x >= modX && x < modX+len(modRunes) {
-						i := x - modX
-						if modRunes[i] != ' ' {
-							isPhraseChar = true
-						}
-					} else if hourY >= 0 && y == hourY && x >= hourX && x < hourX+len(hourRunes) {
-						i := x - hourX
-						if hourRunes[i] != ' ' {
-							isPhraseChar = true
-						}
-					}
-
-					if isPhraseChar {
-						screen.SetContent(x, y, bgChars[y][x], nil, tcell.StyleDefault.Foreground(phraseColor))
-					} else {
-						screen.SetContent(x, y, bgChars[y][x], nil, tcell.StyleDefault.Foreground(tcell.NewRGBColor(56, 56, 56)))
-					}
+					screen.SetContent(x, y, bgChars[y][x], nil, tcell.StyleDefault.Foreground(bgDrawColor))
 				}
 			}
 
-// Actual time, dim, top-right corner
+			// Overlay block-font phrase; each glyph line is bigFontH*bigScaleY terminal rows tall
+			centerY := h / 2
+			charH := bigFontH * bigScaleY
+			if hourLine == "" {
+				lineY := centerY - charH/2
+				lineX := (w - bigLineWidth(modLine)) / 2
+				if lineX < 0 {
+					lineX = 0
+				}
+				drawBigLine(screen, modLine, lineX, lineY, phraseColor, bgDrawColor, bgChars, w, h)
+			} else {
+				totalH := charH*2 + 2
+				topY := centerY - totalH/2
+				modX := (w - bigLineWidth(modLine)) / 2
+				if modX < 0 {
+					modX = 0
+				}
+				hourX := (w - bigLineWidth(hourLine)) / 2
+				if hourX < 0 {
+					hourX = 0
+				}
+				drawBigLine(screen, modLine, modX, topY, phraseColor, bgDrawColor, bgChars, w, h)
+				drawBigLine(screen, hourLine, hourX, topY+charH+2, phraseColor, bgDrawColor, bgChars, w, h)
+			}
+
+			// Exact time, dim, top-right corner
 			actualTime := now.Format("15:04:05")
 			dimColor := fuzzyHSLColor(colorPhase, 0.5, 0.50, grayscale)
 			dimStyle := tcell.StyleDefault.Foreground(dimColor)
@@ -209,15 +294,6 @@ func fuzzyMinuteWord(m int) string {
 		return "half"
 	}
 	return ""
-}
-
-func expandPhrase(s string) string {
-	words := strings.Fields(s)
-	expanded := make([]string, len(words))
-	for i, w := range words {
-		expanded[i] = strings.Join(strings.Split(w, ""), " ")
-	}
-	return strings.Join(expanded, "   ")
 }
 
 func splitFuzzyPhrase(phrase string) (string, string) {
